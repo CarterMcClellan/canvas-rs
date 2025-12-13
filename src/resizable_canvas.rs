@@ -44,6 +44,7 @@ fn polygon_to_shape(polygon: &Polygon) -> Shape {
 fn polygons_to_shapes(
     polygons: &[Polygon],
     selected_ids: &[usize],
+    hovered_id: Option<usize>,
     fixed_anchor: &Point,
     translation: &Point,
     scale_x: f64,
@@ -54,6 +55,15 @@ fn polygons_to_shapes(
         .enumerate()
         .map(|(idx, polygon)| {
             let is_selected = selected_ids.contains(&idx);
+            let is_hovered = hovered_id == Some(idx);
+
+            // Determine stroke based on hover state
+            let stroke_color = if is_hovered {
+                scene::Color::from_hex("#3b82f6") // Blue hover color
+            } else {
+                scene::Color::from_hex(&polygon.stroke)
+            };
+            let stroke_width = if is_hovered { 2.0 } else { polygon.stroke_width as f32 };
 
             if is_selected {
                 // Apply transform to selected polygons
@@ -76,16 +86,28 @@ fn polygons_to_shapes(
                     .collect();
 
                 let fill = scene::Color::from_hex(&polygon.fill);
-                let stroke = scene::Color::from_hex(&polygon.stroke);
 
                 let style = ShapeStyle {
                     fill,
-                    stroke: stroke.map(|color| StrokeStyle::new(color, polygon.stroke_width as f32)),
+                    stroke: stroke_color.map(|color| StrokeStyle::new(color, stroke_width)),
                 };
 
                 Shape::new(ShapeGeometry::Polygon { points: transformed_points }, style)
             } else {
-                polygon_to_shape(polygon)
+                // Non-selected polygon with hover styling
+                let points: Vec<Vec2> = parse_points(&polygon.points)
+                    .iter()
+                    .map(|p| Vec2::new(p.x as f32, p.y as f32))
+                    .collect();
+
+                let fill = scene::Color::from_hex(&polygon.fill);
+
+                let style = ShapeStyle {
+                    fill,
+                    stroke: stroke_color.map(|color| StrokeStyle::new(color, stroke_width)),
+                };
+
+                Shape::new(ShapeGeometry::Polygon { points }, style)
             }
         })
         .collect()
@@ -543,6 +565,98 @@ pub fn resizable_canvas() -> Html {
             }
             selection_rect.set(None);
             preview_bbox.set(None);
+        })
+    };
+
+    // GPU-specific mousemove handler with hit testing for hover
+    let on_gpu_mousemove = {
+        let svg_ref = svg_ref.clone();
+        let selection_rect = selection_rect.clone();
+        let polygons = polygons.clone();
+        let preview_bbox = preview_bbox.clone();
+        let hovered_id = hovered_id.clone();
+
+        Callback::from(move |e: MouseEvent| {
+            if let Some(svg) = svg_ref.cast::<SvgsvgElement>() {
+                let point = client_to_svg_coords(&e, &svg);
+
+                if let Some(current_rect) = selection_rect.as_ref() {
+                    // Marquee selection mode - same as on_svg_mousemove
+                    let updated_rect = SelectionRect::new(current_rect.start, point);
+                    selection_rect.set(Some(updated_rect));
+
+                    let bbox = SelectionRect::new(current_rect.start, point).to_bounding_box();
+                    let mut selected_polygons: Vec<Polygon> = Vec::new();
+                    for polygon in polygons.iter() {
+                        let points = parse_points(&polygon.points);
+                        let intersects = points.iter().any(|p| {
+                            p.x >= bbox.x && p.x <= bbox.x + bbox.width &&
+                            p.y >= bbox.y && p.y <= bbox.y + bbox.height
+                        });
+                        if intersects {
+                            selected_polygons.push(polygon.clone());
+                        }
+                    }
+
+                    if !selected_polygons.is_empty() {
+                        let preview = calculate_bounding_box(&selected_polygons);
+                        preview_bbox.set(Some(preview));
+                    } else {
+                        preview_bbox.set(None);
+                    }
+                } else {
+                    // Not in marquee mode - do hit testing for hover
+                    let new_hovered = find_polygon_at_point(&polygons, &point);
+                    if new_hovered != *hovered_id {
+                        hovered_id.set(new_hovered);
+                    }
+                }
+            }
+        })
+    };
+
+    // GPU-specific mousedown handler with hit testing for selection
+    let on_gpu_mousedown = {
+        let svg_ref = svg_ref.clone();
+        let selection_rect = selection_rect.clone();
+        let polygons = polygons.clone();
+        let selected_ids = selected_ids.clone();
+        let fixed_anchor = fixed_anchor.clone();
+        let dimensions = dimensions.clone();
+        let base_dimensions = base_dimensions.clone();
+        let is_moving = is_moving.clone();
+        let move_start = move_start.clone();
+        let hovered_id = hovered_id.clone();
+        let translation = translation.clone();
+
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+
+            if let Some(svg) = svg_ref.cast::<SvgsvgElement>() {
+                let point = client_to_svg_coords(&e, &svg);
+
+                // Check if clicked on a shape
+                if let Some(idx) = find_polygon_at_point(&polygons, &point) {
+                    // Select the clicked shape
+                    let poly = &polygons[idx];
+                    let bbox = calculate_bounding_box(&[poly.clone()]);
+
+                    selected_ids.set(vec![idx]);
+                    let anchor = Point::new(bbox.x, bbox.y);
+                    fixed_anchor.set(anchor);
+                    dimensions.set(Dimensions::new(bbox.width, bbox.height));
+                    base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
+                    translation.replace(Point::new(0.0, 0.0));
+
+                    // Start moving immediately
+                    move_start.replace(Some((point, anchor)));
+                    is_moving.set(true);
+                    hovered_id.set(None);
+                } else {
+                    // Clicked on empty space - start marquee selection
+                    selection_rect.set(Some(SelectionRect::new(point, point)));
+                }
+            }
         })
     };
 
@@ -1154,6 +1268,7 @@ pub fn resizable_canvas() -> Html {
                             let shapes = polygons_to_shapes(
                                 &polygons,
                                 &selected_ids,
+                                *hovered_id,
                                 &fixed_anchor,
                                 &trans,
                                 scale_x,
@@ -1194,8 +1309,8 @@ pub fn resizable_canvas() -> Html {
                                         guidelines={(*guidelines).clone()}
                                         marquee_rect={marquee_rect_gpu}
                                         preview_bbox={preview_bbox_gpu}
-                                        onmousedown={on_svg_mousedown.clone()}
-                                        onmousemove={on_svg_mousemove.clone()}
+                                        onmousedown={on_gpu_mousedown.clone()}
+                                        onmousemove={on_gpu_mousemove.clone()}
                                         onmouseup={on_svg_mouseup.clone()}
                                         {on_handle_mousedown}
                                         background_color={[0.0, 0.0, 0.0, 0.0]}
