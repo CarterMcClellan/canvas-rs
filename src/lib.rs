@@ -7,6 +7,9 @@ mod layers_panel;
 mod properties_panel;
 mod chat_panel;
 
+// GPU rendering modules (Phase 1+)
+pub mod scene;
+
 use app::App;
 use wasm_bindgen::prelude::*;
 
