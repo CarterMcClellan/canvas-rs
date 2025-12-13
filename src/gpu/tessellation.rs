@@ -1,5 +1,5 @@
 use crate::gpu::vertex::{Mesh, Vertex};
-use crate::scene::{Color, Shape, ShapeGeometry, ShapeStyle, Transform2D, Vec2};
+use crate::scene::{Color, Shape, ShapeGeometry, Transform2D, Vec2};
 use lyon::geom::point;
 use lyon::path::Path;
 use lyon::tessellation::{
