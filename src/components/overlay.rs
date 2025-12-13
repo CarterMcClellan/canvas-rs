@@ -83,7 +83,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
                         fill="white"
                         stroke="#0d99ff"
                         stroke-width="1"
-                        style={format!("cursor: {};", handle.cursor())}
+                        style={format!("cursor: {}; pointer-events: all;", handle.cursor())}
                         onmousedown={onmousedown}
                     />
                 }

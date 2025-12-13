@@ -59,6 +59,7 @@ pub struct GpuCanvasProps {
     pub on_handle_mousedown: Callback<(HandleName, MouseEvent)>,
 
     /// Background color [r, g, b, a] (0.0 - 1.0)
+    /// Default is white with full opacity to match SVG canvas
     #[prop_or([1.0, 1.0, 1.0, 1.0])]
     pub background_color: [f32; 4],
 }
@@ -162,15 +163,15 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
 
     html! {
         <div
-            class="relative"
-            style={format!("width: {}px; height: {}px;", props.width, props.height)}
+            class="relative canvas-dots"
+            style={format!("width: {}px; height: {}px; background-color: white; border: 1px solid #ccc;", props.width, props.height)}
         >
-            // GPU canvas for shape rendering
+            // GPU canvas for shape rendering - transparent so container background shows through
             <canvas
                 ref={canvas_ref}
                 width={props.width.to_string()}
                 height={props.height.to_string()}
-                style="border: 1px solid #e5e7eb;"
+                style="display: block;"
                 {onmousedown}
                 {onmousemove}
                 {onmouseup}

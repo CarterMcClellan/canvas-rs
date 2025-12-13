@@ -1175,6 +1175,14 @@ pub fn resizable_canvas() -> Html {
 
                             let preview_bbox_gpu = preview_bbox.as_ref().map(|bbox| bbox_to_scene_bbox(bbox));
 
+                            // Create callback adapter for handle mousedown (swap argument order)
+                            let on_handle_mousedown = {
+                                let handler = on_handle_mousedown_ref.clone();
+                                Callback::from(move |(handle, event): (HandleName, MouseEvent)| {
+                                    handler(event, handle);
+                                })
+                            };
+
                             html! {
                                 <>
                                     <GpuCanvas
@@ -1189,6 +1197,8 @@ pub fn resizable_canvas() -> Html {
                                         onmousedown={on_svg_mousedown.clone()}
                                         onmousemove={on_svg_mousemove.clone()}
                                         onmouseup={on_svg_mouseup.clone()}
+                                        {on_handle_mousedown}
+                                        background_color={[0.0, 0.0, 0.0, 0.0]}
                                     />
                                     // Invisible SVG for coordinate conversion (needed for mouse events)
                                     <svg

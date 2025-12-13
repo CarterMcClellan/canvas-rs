@@ -29,9 +29,10 @@ impl Renderer {
         let width = canvas.width();
         let height = canvas.height();
 
-        // Create wgpu instance (supports WebGL2 fallback)
+        // Create wgpu instance - use WebGL2 only for browser compatibility
+        // WebGPU has compatibility issues with wgpu 22.x and current Chrome
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::GL | wgpu::Backends::BROWSER_WEBGPU,
+            backends: wgpu::Backends::GL,
             ..Default::default()
         });
 
@@ -50,15 +51,13 @@ impl Renderer {
             .await
             .ok_or("Failed to find a suitable GPU adapter")?;
 
-        // Request device and queue with adapter's supported limits
-        // This ensures we only request what the browser actually supports
+        // Request device and queue with WebGL2-compatible limits
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Canvas Renderer Device"),
                     required_features: wgpu::Features::empty(),
-                    // Use default limits (empty) to maximize compatibility
-                    required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
                     memory_hints: Default::default(),
                 },
                 None,
@@ -68,12 +67,25 @@ impl Renderer {
 
         // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
+
+        // Prefer non-sRGB format to avoid double gamma correction
+        // (our hex colors are already in sRGB space, so we pass them through directly)
         let surface_format = surface_caps
             .formats
             .iter()
-            .find(|f| f.is_srgb())
+            .find(|f| !f.is_srgb())
             .copied()
             .unwrap_or(surface_caps.formats[0]);
+
+        // Prefer premultiplied alpha for proper transparency compositing with the page
+        let alpha_mode = if surface_caps
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+        {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else {
+            surface_caps.alpha_modes[0]
+        };
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -81,7 +93,7 @@ impl Renderer {
             width,
             height,
             present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: surface_caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
