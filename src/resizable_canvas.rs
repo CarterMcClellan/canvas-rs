@@ -13,33 +13,6 @@ use crate::chat_panel::ChatPanel;
 use crate::components::GpuCanvas;
 use crate::scene::{self, Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox};
 
-/// Rendering mode for the canvas
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RenderMode {
-    /// Traditional SVG DOM rendering
-    Svg,
-    /// GPU-accelerated rendering via wgpu
-    Gpu,
-}
-
-/// Convert old Polygon to new Shape for GPU rendering
-fn polygon_to_shape(polygon: &Polygon) -> Shape {
-    let points: Vec<Vec2> = parse_points(&polygon.points)
-        .iter()
-        .map(|p| Vec2::new(p.x as f32, p.y as f32))
-        .collect();
-
-    let fill = scene::Color::from_hex(&polygon.fill);
-    let stroke = scene::Color::from_hex(&polygon.stroke);
-
-    let style = ShapeStyle {
-        fill,
-        stroke: stroke.map(|color| StrokeStyle::new(color, polygon.stroke_width as f32)),
-    };
-
-    Shape::new(ShapeGeometry::Polygon { points }, style)
-}
-
 /// Convert polygons to shapes for GPU rendering, applying transform to selected ones
 fn polygons_to_shapes(
     polygons: &[Polygon],
@@ -126,8 +99,6 @@ const CANVAS_WIDTH: f64 = 800.0;
 const CANVAS_HEIGHT: f64 = 600.0;
 const MIN_SIZE: f64 = 10.0;
 const SNAP_THRESHOLD: f64 = 5.0;
-const HANDLE_SIZE_EDGE: f64 = 6.0;
-const HANDLE_SIZE_CORNER: f64 = 8.0;
 
 fn get_initial_polygons() -> Vec<Polygon> {
     vec![
@@ -174,8 +145,7 @@ pub fn resizable_canvas() -> Html {
         Message::assistant("Hello! I'm your design assistant. How can I help you today?".to_string())
     ]);
 
-    // GPU rendering mode
-    let render_mode = use_state(|| RenderMode::Svg);
+    // GPU rendering
     let render_version = use_state(|| 0u32);
 
     // Refs
@@ -227,8 +197,6 @@ pub fn resizable_canvas() -> Html {
     } else {
         1.0
     };
-    let is_flipped_x = dimensions.width < 0.0;
-    let is_flipped_y = dimensions.height < 0.0;
 
     let trans = *translation.borrow();
     let bounding_box = BoundingBox::new(
@@ -468,62 +436,7 @@ pub fn resizable_canvas() -> Html {
         // TODO: Update selected polygon dimensions
     });
 
-    // SVG background click (clear selection)
-    let on_svg_mousedown = {
-        let svg_ref = svg_ref.clone();
-        let selection_rect = selection_rect.clone();
-
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-
-            if let Some(svg) = svg_ref.cast::<SvgsvgElement>() {
-                // Start marquee selection from the click point
-                let point = client_to_svg_coords(&e, &svg);
-                selection_rect.set(Some(SelectionRect::new(point, point)));
-            }
-        })
-    };
-
-    // Track marquee drag directly on the SVG to avoid missing window events
-    let on_svg_mousemove = {
-        let svg_ref = svg_ref.clone();
-        let selection_rect = selection_rect.clone();
-        let polygons = polygons.clone();
-        let preview_bbox = preview_bbox.clone();
-
-        Callback::from(move |e: MouseEvent| {
-            if let Some(svg) = svg_ref.cast::<SvgsvgElement>() {
-                if let Some(current_rect) = selection_rect.as_ref() {
-                    let point = client_to_svg_coords(&e, &svg);
-                    let updated_rect = SelectionRect::new(current_rect.start, point);
-                    selection_rect.set(Some(updated_rect));
-
-                    // Update preview to keep the UI responsive during drag
-                    let bbox = SelectionRect::new(current_rect.start, point).to_bounding_box();
-                    let mut selected_polygons: Vec<Polygon> = Vec::new();
-                    for polygon in polygons.iter() {
-                        let points = parse_points(&polygon.points);
-                        let intersects = points.iter().any(|p| {
-                            p.x >= bbox.x && p.x <= bbox.x + bbox.width &&
-                            p.y >= bbox.y && p.y <= bbox.y + bbox.height
-                        });
-                        if intersects {
-                            selected_polygons.push(polygon.clone());
-                        }
-                    }
-
-                    if !selected_polygons.is_empty() {
-                        let preview = calculate_bounding_box(&selected_polygons);
-                        preview_bbox.set(Some(preview));
-                    } else {
-                        preview_bbox.set(None);
-                    }
-                }
-            }
-        })
-    };
-
-    // Commit marquee selection when mouseup occurs on the SVG itself (fast path)
+    // Commit marquee selection when mouseup occurs
     let on_svg_mouseup = {
         let svg_ref = svg_ref.clone();
         let selection_rect = selection_rect.clone();
@@ -1064,201 +977,6 @@ pub fn resizable_canvas() -> Html {
         });
     }
 
-    // Render handles
-    let render_handles = || {
-        let handles = vec![
-            HandleName::TopLeft,
-            HandleName::Top,
-            HandleName::TopRight,
-            HandleName::Right,
-            HandleName::BottomRight,
-            HandleName::Bottom,
-            HandleName::BottomLeft,
-            HandleName::Left,
-        ];
-
-        handles.into_iter().map(|handle| {
-            let pos = handle.calc_position(&bounding_box);
-            let size = if handle.is_corner() { HANDLE_SIZE_CORNER } else { HANDLE_SIZE_EDGE };
-            let cursor = handle.cursor();
-
-            // Determine if this is the fixed anchor (opposite of active handle)
-            let is_fixed = if let Some(active) = *active_handle {
-                let opposite = match active {
-                    HandleName::TopLeft => HandleName::BottomRight,
-                    HandleName::Top => HandleName::Bottom,
-                    HandleName::TopRight => HandleName::BottomLeft,
-                    HandleName::Right => HandleName::Left,
-                    HandleName::BottomRight => HandleName::TopLeft,
-                    HandleName::Bottom => HandleName::Top,
-                    HandleName::BottomLeft => HandleName::TopRight,
-                    HandleName::Left => HandleName::Right,
-                };
-                handle == opposite
-            } else {
-                false
-            };
-
-            let onmousedown = {
-                let handler = on_handle_mousedown_ref.clone();
-                Callback::from(move |e: MouseEvent| {
-                    handler(e, handle);
-                })
-            };
-
-            html! {
-                <rect
-                    key={format!("handle-{:?}", handle)}
-                    data-testid={format!("resize-handle-{}", handle.to_kebab_case())}
-                    data-is-fixed-anchor={is_fixed.to_string()}
-                    x={(pos.x - size / 2.0).to_string()}
-                    y={(pos.y - size / 2.0).to_string()}
-                    width={size.to_string()}
-                    height={size.to_string()}
-                    fill="white"
-                    stroke="#3b82f6"
-                    stroke-width="1"
-                    style={format!("cursor: {}", cursor)}
-                    onmousedown={onmousedown}
-                />
-            }
-        }).collect::<Html>()
-    };
-
-    // Render guidelines
-    let render_guidelines = || {
-        guidelines.iter().map(|guideline| {
-            match guideline.guideline_type {
-                GuidelineType::Vertical => html! {
-                    <line
-                        x1={guideline.pos.to_string()}
-                        y1={guideline.start.to_string()}
-                        x2={guideline.pos.to_string()}
-                        y2={guideline.end.to_string()}
-                        stroke="red"
-                        stroke-width="1"
-                    />
-                },
-                GuidelineType::Horizontal => html! {
-                    <line
-                        x1={guideline.start.to_string()}
-                        y1={guideline.pos.to_string()}
-                        x2={guideline.end.to_string()}
-                        y2={guideline.pos.to_string()}
-                        stroke="red"
-                        stroke-width="1"
-                    />
-                },
-            }
-        }).collect::<Html>()
-    };
-
-    // Render polygons - inline the rendering to avoid lifetime issues
-    let rendered_polygons = polygons.iter().enumerate().map(|(idx, polygon)| {
-        let is_selected = selected_ids.contains(&idx);
-        let is_hovered = *hovered_id == Some(idx);
-
-        let points_to_render = if is_selected && has_selection {
-            // Transform the polygon
-            let origin = *fixed_anchor;
-            let trans = *translation.borrow();
-            let original_points = parse_points(&polygon.points);
-            let transformed_points: Vec<Point> = original_points
-                .iter()
-                .map(|p| {
-                    let local_x = p.x - origin.x;
-                    let local_y = p.y - origin.y;
-                    Point::new(
-                        origin.x + trans.x + local_x * scale_x,
-                        origin.y + trans.y + local_y * scale_y,
-                    )
-                })
-                .collect();
-            stringify_points(&transformed_points)
-        } else {
-            polygon.points.clone()
-        };
-
-        let stroke = if is_hovered { "#3b82f6" } else { &polygon.stroke };
-        let stroke_width = if is_hovered { 2.0 } else { polygon.stroke_width };
-
-        // Combined mousedown handler: select polygon AND start moving
-        let onmousedown = {
-            let svg_ref = svg_ref.clone();
-            let polygons = polygons.clone();
-            let selected_ids = selected_ids.clone();
-            let fixed_anchor = fixed_anchor.clone();
-            let dimensions = dimensions.clone();
-            let base_dimensions = base_dimensions.clone();
-            let selection_origin = selection_origin.clone();
-            let translation = translation.clone();
-            let guidelines = guidelines.clone();
-            let resize_base_signed = resize_base_signed.clone();
-            let resize_start_anchor = resize_start_anchor.clone();
-            let is_moving = is_moving.clone();
-            let move_start = move_start.clone();
-            let hovered_id = hovered_id.clone();
-
-            Callback::from(move |e: MouseEvent| {
-                e.stop_propagation();
-
-                // Get the polygon and compute its bounding box
-                let selected_polygon = polygons.get(idx).cloned();
-                if let Some(poly) = selected_polygon {
-                    let bbox = calculate_bounding_box(&[poly]);
-
-                    // Set selection state
-                    selected_ids.set(vec![idx]);
-                    let anchor = Point::new(bbox.x, bbox.y);
-                    fixed_anchor.set(anchor);
-                    dimensions.set(Dimensions::new(bbox.width, bbox.height));
-                    base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
-                    selection_origin.set(Some(anchor));
-                    *translation.borrow_mut() = Point::zero();
-                    guidelines.set(Vec::new());
-                    resize_base_signed.replace(None);
-                    resize_start_anchor.replace(None);
-
-                    // Start moving immediately
-                    if let Some(svg) = svg_ref.cast::<SvgsvgElement>() {
-                        let point = client_to_svg_coords(&e, &svg);
-                        move_start.replace(Some((point, anchor)));
-                        is_moving.set(true);
-                        hovered_id.set(None);
-                    }
-                }
-            })
-        };
-
-        let onmouseenter = {
-            let hovered_id = hovered_id.clone();
-            Callback::from(move |_| {
-                hovered_id.set(Some(idx));
-            })
-        };
-
-        let onmouseleave = {
-            let hovered_id = hovered_id.clone();
-            Callback::from(move |_| {
-                hovered_id.set(None);
-            })
-        };
-
-        html! {
-            <polygon
-                key={idx}
-                points={points_to_render}
-                fill={polygon.fill.clone()}
-                stroke={stroke.to_string()}
-                stroke-width={stroke_width.to_string()}
-                style="cursor: pointer;"
-                onmousedown={onmousedown}
-                onmouseenter={onmouseenter}
-                onmouseleave={onmouseleave}
-            />
-        }
-    }).collect::<Html>();
-
     // Get selected polygon for properties panel
     let selected_polygon = if selected_ids.len() == 1 {
         polygons.get(selected_ids[0]).cloned()
@@ -1270,6 +988,40 @@ pub fn resizable_canvas() -> Html {
         Some(bounding_box)
     } else {
         None
+    };
+
+    // GPU rendering - prepare shapes and state for rendering
+    let shapes = polygons_to_shapes(
+        &polygons,
+        &selected_ids,
+        *hovered_id,
+        &fixed_anchor,
+        &trans,
+        scale_x,
+        scale_y,
+    );
+
+    let selection_bbox_gpu = if has_selection {
+        Some(bbox_to_scene_bbox(&bounding_box))
+    } else {
+        None
+    };
+
+    let marquee_rect_gpu = selection_rect.as_ref().map(|rect| {
+        (
+            Vec2::new(rect.start.x as f32, rect.start.y as f32),
+            Vec2::new(rect.current.x as f32, rect.current.y as f32),
+        )
+    });
+
+    let preview_bbox_gpu = preview_bbox.as_ref().map(|bbox| bbox_to_scene_bbox(bbox));
+
+    // Create callback adapter for handle mousedown (swap argument order)
+    let on_handle_mousedown = {
+        let handler = on_handle_mousedown_ref.clone();
+        Callback::from(move |(handle, event): (HandleName, MouseEvent)| {
+            handler(event, handle);
+        })
     };
 
     html! {
@@ -1284,162 +1036,30 @@ pub fn resizable_canvas() -> Html {
             // Main Canvas Area (Center)
             <div class="flex-1 flex items-center justify-center bg-gray-100 relative">
                 <div class="relative">
-                    {
-                        if *render_mode == RenderMode::Gpu {
-                            // GPU rendering mode
-                            let shapes = polygons_to_shapes(
-                                &polygons,
-                                &selected_ids,
-                                *hovered_id,
-                                &fixed_anchor,
-                                &trans,
-                                scale_x,
-                                scale_y,
-                            );
-
-                            let selection_bbox_gpu = if has_selection {
-                                Some(bbox_to_scene_bbox(&bounding_box))
-                            } else {
-                                None
-                            };
-
-                            let marquee_rect_gpu = selection_rect.as_ref().map(|rect| {
-                                (
-                                    Vec2::new(rect.start.x as f32, rect.start.y as f32),
-                                    Vec2::new(rect.current.x as f32, rect.current.y as f32),
-                                )
-                            });
-
-                            let preview_bbox_gpu = preview_bbox.as_ref().map(|bbox| bbox_to_scene_bbox(bbox));
-
-                            // Create callback adapter for handle mousedown (swap argument order)
-                            let on_handle_mousedown = {
-                                let handler = on_handle_mousedown_ref.clone();
-                                Callback::from(move |(handle, event): (HandleName, MouseEvent)| {
-                                    handler(event, handle);
-                                })
-                            };
-
-                            html! {
-                                <>
-                                    <GpuCanvas
-                                        width={CANVAS_WIDTH as u32}
-                                        height={CANVAS_HEIGHT as u32}
-                                        shapes={shapes}
-                                        render_version={*render_version}
-                                        selection_bbox={selection_bbox_gpu}
-                                        guidelines={(*guidelines).clone()}
-                                        marquee_rect={marquee_rect_gpu}
-                                        preview_bbox={preview_bbox_gpu}
-                                        onmousedown={on_gpu_mousedown.clone()}
-                                        onmousemove={on_gpu_mousemove.clone()}
-                                        onmouseup={on_svg_mouseup.clone()}
-                                        {on_handle_mousedown}
-                                        on_bbox_mousedown={on_bbox_mousedown.clone()}
-                                        is_shape_hovered={hovered_id.is_some()}
-                                        background_color={[0.0, 0.0, 0.0, 0.0]}
-                                    />
-                                    // Invisible SVG for coordinate conversion (needed for mouse events)
-                                    <svg
-                                        ref={svg_ref.clone()}
-                                        width={CANVAS_WIDTH.to_string()}
-                                        height={CANVAS_HEIGHT.to_string()}
-                                        style="position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0;"
-                                    />
-                                </>
-                            }
-                        } else {
-                            // SVG rendering mode (original)
-                            html! {
-                                <svg
-                                    ref={svg_ref.clone()}
-                                    width={CANVAS_WIDTH.to_string()}
-                                    height={CANVAS_HEIGHT.to_string()}
-                                    data-testid="main-canvas"
-                                    data-flip-x={is_flipped_x.to_string()}
-                                    data-flip-y={is_flipped_y.to_string()}
-                                    data-dim-width={dimensions.width.to_string()}
-                                    data-dim-height={dimensions.height.to_string()}
-                                    data-selection-ids={selected_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",")}
-                                    class="canvas-dots"
-                                    style="border: 1px solid #ccc; background-color: white;"
-                                    onmousedown={on_svg_mousedown.clone()}
-                                    onmousemove={on_svg_mousemove.clone()}
-                                    onmouseup={on_svg_mouseup.clone()}
-                                >
-                                    // Render polygons
-                                    {rendered_polygons}
-
-                                    // Render bounding box
-                                    if has_selection {
-                                        <rect
-                                            data-testid="selection-bounding-box"
-                                            x={bounding_box.x.to_string()}
-                                            y={bounding_box.y.to_string()}
-                                            width={bounding_box.width.to_string()}
-                                            height={bounding_box.height.to_string()}
-                                            data-flip-x={is_flipped_x.to_string()}
-                                            data-flip-y={is_flipped_y.to_string()}
-                                            data-dim-width={dimensions.width.to_string()}
-                                            data-dim-height={dimensions.height.to_string()}
-                                            fill="none"
-                                            stroke="#3b82f6"
-                                            stroke-width="2"
-                                            style="cursor: move; pointer-events: all;"
-                                            onmousedown={on_bbox_mousedown.clone()}
-                                        />
-
-                                        // Render handles
-                                        {render_handles()}
-                                    }
-
-                                    // Render guidelines
-                                    {render_guidelines()}
-
-                                    // Render selection rectangle
-                                    {
-                                        if let Some(rect) = selection_rect.as_ref() {
-                                            let bbox = rect.to_bounding_box();
-                                            html! {
-                                                <rect
-                                                    data-testid="marquee-selection-rect"
-                                                    x={bbox.x.to_string()}
-                                                    y={bbox.y.to_string()}
-                                                    width={bbox.width.to_string()}
-                                                    height={bbox.height.to_string()}
-                                                    fill="rgba(59, 130, 246, 0.1)"
-                                                    stroke="#3b82f6"
-                                                    stroke-width="1"
-                                                />
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-
-                                    // Render preview bounding box (during marquee selection)
-                                    {
-                                        if let Some(bbox) = preview_bbox.as_ref() {
-                                            html! {
-                                                <rect
-                                                    data-testid="preview-bounding-box"
-                                                    x={bbox.x.to_string()}
-                                                    y={bbox.y.to_string()}
-                                                    width={bbox.width.to_string()}
-                                                    height={bbox.height.to_string()}
-                                                    fill="none"
-                                                    stroke="#3b82f6"
-                                                    stroke-width="1"
-                                                />
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                </svg>
-                            }
-                        }
-                    }
+                    <GpuCanvas
+                        width={CANVAS_WIDTH as u32}
+                        height={CANVAS_HEIGHT as u32}
+                        shapes={shapes}
+                        render_version={*render_version}
+                        selection_bbox={selection_bbox_gpu}
+                        guidelines={(*guidelines).clone()}
+                        marquee_rect={marquee_rect_gpu}
+                        preview_bbox={preview_bbox_gpu}
+                        onmousedown={on_gpu_mousedown.clone()}
+                        onmousemove={on_gpu_mousemove.clone()}
+                        onmouseup={on_svg_mouseup.clone()}
+                        on_handle_mousedown={on_handle_mousedown}
+                        on_bbox_mousedown={on_bbox_mousedown.clone()}
+                        is_shape_hovered={hovered_id.is_some()}
+                        background_color={[0.0, 0.0, 0.0, 0.0]}
+                    />
+                    // Invisible SVG for coordinate conversion (needed for mouse events)
+                    <svg
+                        ref={svg_ref.clone()}
+                        width={CANVAS_WIDTH.to_string()}
+                        height={CANVAS_HEIGHT.to_string()}
+                        style="position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0;"
+                    />
 
                     // Control buttons
                     <div class="absolute top-4 left-4 flex gap-2" style="z-index: 50;">
@@ -1448,29 +1068,6 @@ pub fn resizable_canvas() -> Html {
                             class="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50"
                         >
                             {"Reset"}
-                        </button>
-                        <button
-                            onclick={{
-                                let render_mode = render_mode.clone();
-                                let render_version = render_version.clone();
-                                Callback::from(move |_| {
-                                    render_mode.set(match *render_mode {
-                                        RenderMode::Svg => RenderMode::Gpu,
-                                        RenderMode::Gpu => RenderMode::Svg,
-                                    });
-                                    render_version.set(*render_version + 1);
-                                })
-                            }}
-                            class={format!(
-                                "px-3 py-1 border rounded text-sm {}",
-                                if *render_mode == RenderMode::Gpu {
-                                    "bg-green-500 text-white border-green-600 hover:bg-green-600"
-                                } else {
-                                    "bg-white border-gray-300 hover:bg-gray-50"
-                                }
-                            )}
-                        >
-                            {if *render_mode == RenderMode::Gpu { "GPU Mode" } else { "SVG Mode" }}
                         </button>
                     </div>
                 </div>
