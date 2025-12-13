@@ -10,6 +10,94 @@ use crate::snap_logic::calculate_snap;
 use crate::layers_panel::LayersPanel;
 use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
+use crate::components::GpuCanvas;
+use crate::scene::{self, Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox};
+
+/// Rendering mode for the canvas
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RenderMode {
+    /// Traditional SVG DOM rendering
+    Svg,
+    /// GPU-accelerated rendering via wgpu
+    Gpu,
+}
+
+/// Convert old Polygon to new Shape for GPU rendering
+fn polygon_to_shape(polygon: &Polygon) -> Shape {
+    let points: Vec<Vec2> = parse_points(&polygon.points)
+        .iter()
+        .map(|p| Vec2::new(p.x as f32, p.y as f32))
+        .collect();
+
+    let fill = scene::Color::from_hex(&polygon.fill);
+    let stroke = scene::Color::from_hex(&polygon.stroke);
+
+    let style = ShapeStyle {
+        fill,
+        stroke: stroke.map(|color| StrokeStyle::new(color, polygon.stroke_width as f32)),
+    };
+
+    Shape::new(ShapeGeometry::Polygon { points }, style)
+}
+
+/// Convert polygons to shapes for GPU rendering, applying transform to selected ones
+fn polygons_to_shapes(
+    polygons: &[Polygon],
+    selected_ids: &[usize],
+    fixed_anchor: &Point,
+    translation: &Point,
+    scale_x: f64,
+    scale_y: f64,
+) -> Vec<Shape> {
+    polygons
+        .iter()
+        .enumerate()
+        .map(|(idx, polygon)| {
+            let is_selected = selected_ids.contains(&idx);
+
+            if is_selected {
+                // Apply transform to selected polygons
+                let origin = Vec2::new(fixed_anchor.x as f32, fixed_anchor.y as f32);
+                let original_points: Vec<Vec2> = parse_points(&polygon.points)
+                    .iter()
+                    .map(|p| Vec2::new(p.x as f32, p.y as f32))
+                    .collect();
+
+                let transformed_points: Vec<Vec2> = original_points
+                    .iter()
+                    .map(|p| {
+                        let local_x = p.x - origin.x;
+                        let local_y = p.y - origin.y;
+                        Vec2::new(
+                            origin.x + translation.x as f32 + local_x * scale_x as f32,
+                            origin.y + translation.y as f32 + local_y * scale_y as f32,
+                        )
+                    })
+                    .collect();
+
+                let fill = scene::Color::from_hex(&polygon.fill);
+                let stroke = scene::Color::from_hex(&polygon.stroke);
+
+                let style = ShapeStyle {
+                    fill,
+                    stroke: stroke.map(|color| StrokeStyle::new(color, polygon.stroke_width as f32)),
+                };
+
+                Shape::new(ShapeGeometry::Polygon { points: transformed_points }, style)
+            } else {
+                polygon_to_shape(polygon)
+            }
+        })
+        .collect()
+}
+
+/// Convert old BoundingBox to new BBox for GPU rendering
+fn bbox_to_scene_bbox(bbox: &BoundingBox) -> BBox {
+    BBox::new(
+        Vec2::new(bbox.x as f32, bbox.y as f32),
+        Vec2::new((bbox.x + bbox.width) as f32, (bbox.y + bbox.height) as f32),
+    )
+}
 
 const CANVAS_WIDTH: f64 = 800.0;
 const CANVAS_HEIGHT: f64 = 600.0;
@@ -62,6 +150,10 @@ pub fn resizable_canvas() -> Html {
     let chat_messages = use_state(|| vec![
         Message::assistant("Hello! I'm your design assistant. How can I help you today?".to_string())
     ]);
+
+    // GPU rendering mode
+    let render_mode = use_state(|| RenderMode::Svg);
+    let render_version = use_state(|| 0u32);
 
     // Refs
     let svg_ref = use_node_ref();
@@ -1056,100 +1148,182 @@ pub fn resizable_canvas() -> Html {
             // Main Canvas Area (Center)
             <div class="flex-1 flex items-center justify-center bg-gray-100 relative">
                 <div class="relative">
-                    <svg
-                        ref={svg_ref.clone()}
-                        width={CANVAS_WIDTH.to_string()}
-                        height={CANVAS_HEIGHT.to_string()}
-                        data-testid="main-canvas"
-                        data-flip-x={is_flipped_x.to_string()}
-                        data-flip-y={is_flipped_y.to_string()}
-                        data-dim-width={dimensions.width.to_string()}
-                        data-dim-height={dimensions.height.to_string()}
-                        data-selection-ids={selected_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",")}
-                        class="canvas-dots"
-                        style="border: 1px solid #ccc; background-color: white;"
-                        onmousedown={on_svg_mousedown}
-                        onmousemove={on_svg_mousemove}
-                        onmouseup={on_svg_mouseup}
-                    >
-                        // Render polygons
-                        {rendered_polygons}
+                    {
+                        if *render_mode == RenderMode::Gpu {
+                            // GPU rendering mode
+                            let shapes = polygons_to_shapes(
+                                &polygons,
+                                &selected_ids,
+                                &fixed_anchor,
+                                &trans,
+                                scale_x,
+                                scale_y,
+                            );
 
-                        // Render bounding box
-                        if has_selection {
-                            <rect
-                                data-testid="selection-bounding-box"
-                                x={bounding_box.x.to_string()}
-                                y={bounding_box.y.to_string()}
-                                width={bounding_box.width.to_string()}
-                                height={bounding_box.height.to_string()}
-                                data-flip-x={is_flipped_x.to_string()}
-                                data-flip-y={is_flipped_y.to_string()}
-                                data-dim-width={dimensions.width.to_string()}
-                                data-dim-height={dimensions.height.to_string()}
-                                fill="none"
-                                stroke="#3b82f6"
-                                stroke-width="2"
-                                style="cursor: move; pointer-events: all;"
-                                onmousedown={on_bbox_mousedown}
-                            />
-
-                            // Render handles
-                            {render_handles()}
-                        }
-
-                        // Render guidelines
-                        {render_guidelines()}
-
-                        // Render selection rectangle
-                        {
-                            if let Some(rect) = selection_rect.as_ref() {
-                                let bbox = rect.to_bounding_box();
-                                html! {
-                                    <rect
-                                        data-testid="marquee-selection-rect"
-                                        x={bbox.x.to_string()}
-                                        y={bbox.y.to_string()}
-                                        width={bbox.width.to_string()}
-                                        height={bbox.height.to_string()}
-                                        fill="rgba(59, 130, 246, 0.1)"
-                                        stroke="#3b82f6"
-                                        stroke-width="1"
-                                    />
-                                }
+                            let selection_bbox_gpu = if has_selection {
+                                Some(bbox_to_scene_bbox(&bounding_box))
                             } else {
-                                html! {}
+                                None
+                            };
+
+                            let marquee_rect_gpu = selection_rect.as_ref().map(|rect| {
+                                (
+                                    Vec2::new(rect.start.x as f32, rect.start.y as f32),
+                                    Vec2::new(rect.current.x as f32, rect.current.y as f32),
+                                )
+                            });
+
+                            let preview_bbox_gpu = preview_bbox.as_ref().map(|bbox| bbox_to_scene_bbox(bbox));
+
+                            html! {
+                                <>
+                                    <GpuCanvas
+                                        width={CANVAS_WIDTH as u32}
+                                        height={CANVAS_HEIGHT as u32}
+                                        shapes={shapes}
+                                        render_version={*render_version}
+                                        selection_bbox={selection_bbox_gpu}
+                                        guidelines={(*guidelines).clone()}
+                                        marquee_rect={marquee_rect_gpu}
+                                        preview_bbox={preview_bbox_gpu}
+                                        onmousedown={on_svg_mousedown.clone()}
+                                        onmousemove={on_svg_mousemove.clone()}
+                                        onmouseup={on_svg_mouseup.clone()}
+                                    />
+                                    // Invisible SVG for coordinate conversion (needed for mouse events)
+                                    <svg
+                                        ref={svg_ref.clone()}
+                                        width={CANVAS_WIDTH.to_string()}
+                                        height={CANVAS_HEIGHT.to_string()}
+                                        style="position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0;"
+                                    />
+                                </>
+                            }
+                        } else {
+                            // SVG rendering mode (original)
+                            html! {
+                                <svg
+                                    ref={svg_ref.clone()}
+                                    width={CANVAS_WIDTH.to_string()}
+                                    height={CANVAS_HEIGHT.to_string()}
+                                    data-testid="main-canvas"
+                                    data-flip-x={is_flipped_x.to_string()}
+                                    data-flip-y={is_flipped_y.to_string()}
+                                    data-dim-width={dimensions.width.to_string()}
+                                    data-dim-height={dimensions.height.to_string()}
+                                    data-selection-ids={selected_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",")}
+                                    class="canvas-dots"
+                                    style="border: 1px solid #ccc; background-color: white;"
+                                    onmousedown={on_svg_mousedown.clone()}
+                                    onmousemove={on_svg_mousemove.clone()}
+                                    onmouseup={on_svg_mouseup.clone()}
+                                >
+                                    // Render polygons
+                                    {rendered_polygons}
+
+                                    // Render bounding box
+                                    if has_selection {
+                                        <rect
+                                            data-testid="selection-bounding-box"
+                                            x={bounding_box.x.to_string()}
+                                            y={bounding_box.y.to_string()}
+                                            width={bounding_box.width.to_string()}
+                                            height={bounding_box.height.to_string()}
+                                            data-flip-x={is_flipped_x.to_string()}
+                                            data-flip-y={is_flipped_y.to_string()}
+                                            data-dim-width={dimensions.width.to_string()}
+                                            data-dim-height={dimensions.height.to_string()}
+                                            fill="none"
+                                            stroke="#3b82f6"
+                                            stroke-width="2"
+                                            style="cursor: move; pointer-events: all;"
+                                            onmousedown={on_bbox_mousedown.clone()}
+                                        />
+
+                                        // Render handles
+                                        {render_handles()}
+                                    }
+
+                                    // Render guidelines
+                                    {render_guidelines()}
+
+                                    // Render selection rectangle
+                                    {
+                                        if let Some(rect) = selection_rect.as_ref() {
+                                            let bbox = rect.to_bounding_box();
+                                            html! {
+                                                <rect
+                                                    data-testid="marquee-selection-rect"
+                                                    x={bbox.x.to_string()}
+                                                    y={bbox.y.to_string()}
+                                                    width={bbox.width.to_string()}
+                                                    height={bbox.height.to_string()}
+                                                    fill="rgba(59, 130, 246, 0.1)"
+                                                    stroke="#3b82f6"
+                                                    stroke-width="1"
+                                                />
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+
+                                    // Render preview bounding box (during marquee selection)
+                                    {
+                                        if let Some(bbox) = preview_bbox.as_ref() {
+                                            html! {
+                                                <rect
+                                                    data-testid="preview-bounding-box"
+                                                    x={bbox.x.to_string()}
+                                                    y={bbox.y.to_string()}
+                                                    width={bbox.width.to_string()}
+                                                    height={bbox.height.to_string()}
+                                                    fill="none"
+                                                    stroke="#3b82f6"
+                                                    stroke-width="1"
+                                                />
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </svg>
                             }
                         }
+                    }
 
-                        // Render preview bounding box (during marquee selection)
-                        {
-                            if let Some(bbox) = preview_bbox.as_ref() {
-                                html! {
-                                    <rect
-                                        data-testid="preview-bounding-box"
-                                        x={bbox.x.to_string()}
-                                        y={bbox.y.to_string()}
-                                        width={bbox.width.to_string()}
-                                        height={bbox.height.to_string()}
-                                        fill="none"
-                                        stroke="#3b82f6"
-                                        stroke-width="1"
-                                    />
+                    // Control buttons
+                    <div class="absolute top-4 left-4 flex gap-2" style="z-index: 50;">
+                        <button
+                            onclick={on_reset}
+                            class="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50"
+                        >
+                            {"Reset"}
+                        </button>
+                        <button
+                            onclick={{
+                                let render_mode = render_mode.clone();
+                                let render_version = render_version.clone();
+                                Callback::from(move |_| {
+                                    render_mode.set(match *render_mode {
+                                        RenderMode::Svg => RenderMode::Gpu,
+                                        RenderMode::Gpu => RenderMode::Svg,
+                                    });
+                                    render_version.set(*render_version + 1);
+                                })
+                            }}
+                            class={format!(
+                                "px-3 py-1 border rounded text-sm {}",
+                                if *render_mode == RenderMode::Gpu {
+                                    "bg-green-500 text-white border-green-600 hover:bg-green-600"
+                                } else {
+                                    "bg-white border-gray-300 hover:bg-gray-50"
                                 }
-                            } else {
-                                html! {}
-                            }
-                        }
-                    </svg>
-
-                    <button
-                        onclick={on_reset}
-                        class="absolute top-4 left-4 px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50"
-                        style="z-index: 50;"
-                    >
-                        {"Reset"}
-                    </button>
+                            )}
+                        >
+                            {if *render_mode == RenderMode::Gpu { "GPU Mode" } else { "SVG Mode" }}
+                        </button>
+                    </div>
                 </div>
             </div>
 

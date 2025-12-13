@@ -1,6 +1,6 @@
 use crate::components::overlay::CanvasOverlay;
-use crate::gpu::{Mesh, Renderer, Tessellator};
-use crate::scene::{BBox, SceneGraph, Shape, Vec2};
+use crate::gpu::{Renderer, Tessellator};
+use crate::scene::{BBox, Shape, Vec2};
 use crate::types::{Guideline, HandleName};
 use std::cell::RefCell;
 use std::rc::Rc;
