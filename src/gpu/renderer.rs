@@ -50,13 +50,15 @@ impl Renderer {
             .await
             .ok_or("Failed to find a suitable GPU adapter")?;
 
-        // Request device and queue
+        // Request device and queue with adapter's supported limits
+        // This ensures we only request what the browser actually supports
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Canvas Renderer Device"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    // Use default limits (empty) to maximize compatibility
+                    required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
                     memory_hints: Default::default(),
                 },
                 None,
