@@ -111,8 +111,8 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
                     width={format!("{}", bbox.width())}
                     height={format!("{}", bbox.height())}
                     fill="transparent"
-                    stroke="#0d99ff"
-                    stroke-width="1"
+                    stroke="#3b82f6"
+                    stroke-width="2"
                     style="cursor: move; pointer-events: all;"
                     onmousedown={bbox_onmousedown}
                 />
@@ -124,7 +124,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
         html! {}
     };
 
-    // Render snap guidelines
+    // Render snap guidelines (solid red lines to match SVG mode)
     let guideline_elements: Html = props
         .guidelines
         .iter()
@@ -138,9 +138,8 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
                         y1={format!("{}", guideline.start)}
                         x2={format!("{}", guideline.pos)}
                         y2={format!("{}", guideline.end)}
-                        stroke="#ff4444"
+                        stroke="red"
                         stroke-width="1"
-                        stroke-dasharray="4,4"
                     />
                 },
                 GuidelineType::Horizontal => html! {
@@ -150,9 +149,8 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
                         y1={format!("{}", guideline.pos)}
                         x2={format!("{}", guideline.end)}
                         y2={format!("{}", guideline.pos)}
-                        stroke="#ff4444"
+                        stroke="red"
                         stroke-width="1"
-                        stroke-dasharray="4,4"
                     />
                 },
             }
@@ -190,9 +188,8 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
                 width={format!("{}", bbox.width())}
                 height={format!("{}", bbox.height())}
                 fill="none"
-                stroke="#0d99ff"
+                stroke="#3b82f6"
                 stroke-width="1"
-                stroke-dasharray="2,2"
                 opacity="0.5"
             />
         }

@@ -62,6 +62,10 @@ pub struct GpuCanvasProps {
     #[prop_or_default]
     pub on_bbox_mousedown: Callback<MouseEvent>,
 
+    /// Whether a shape is currently hovered (for cursor styling)
+    #[prop_or(false)]
+    pub is_shape_hovered: bool,
+
     /// Background color [r, g, b, a] (0.0 - 1.0)
     /// Default is white with full opacity to match SVG canvas
     #[prop_or([1.0, 1.0, 1.0, 1.0])]
@@ -165,6 +169,9 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
         })
     };
 
+    // Determine cursor based on hover state
+    let canvas_cursor = if props.is_shape_hovered { "pointer" } else { "default" };
+
     html! {
         <div
             class="canvas-dots"
@@ -175,7 +182,7 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
                 ref={canvas_ref}
                 width={props.width.to_string()}
                 height={props.height.to_string()}
-                style="display: block;"
+                style={format!("display: block; cursor: {};", canvas_cursor)}
                 {onmousedown}
                 {onmousemove}
                 {onmouseup}
