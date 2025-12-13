@@ -114,14 +114,14 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
     }
 
     // Render when shapes change or renderer becomes available
+    // Include shapes in dependency to re-render when shape coordinates change (e.g., during resize)
     {
         let renderer_state_clone = (*renderer_state).clone();
         let shapes = props.shapes.clone();
         let background_color = props.background_color;
-        let render_version = props.render_version;
 
         use_effect_with(
-            (renderer_state_clone.is_some(), render_version, shapes.len()),
+            (renderer_state_clone.is_some(), shapes.clone()),
             move |_| {
                 if let Some(ref state) = renderer_state_clone {
                     let mut state = state.borrow_mut();
