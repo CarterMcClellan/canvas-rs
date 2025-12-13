@@ -4,10 +4,7 @@ use web_sys::window;
 use wasm_bindgen::JsCast;
 
 use crate::resizable_canvas::ResizableCanvas;
-use crate::layers_panel::LayersPanel;
-use crate::properties_panel::PropertiesPanel;
-use crate::chat_panel::ChatPanel;
-use crate::types::{ActiveTab, Message, Polygon};
+use crate::types::ActiveTab;
 
 #[function_component(App)]
 pub fn app() -> Html {

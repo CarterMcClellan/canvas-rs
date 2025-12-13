@@ -73,3 +73,41 @@ pub fn polygons_intersect_rect(polygon: &Polygon, rect: &BoundingBox) -> bool {
     // For a more complete solution, we would need full polygon containment tests
     false
 }
+
+/// Check if a point is inside a polygon using ray casting algorithm
+pub fn point_in_polygon(point: &Point, polygon_points: &[Point]) -> bool {
+    if polygon_points.len() < 3 {
+        return false;
+    }
+
+    let mut inside = false;
+    let n = polygon_points.len();
+    let mut j = n - 1;
+
+    for i in 0..n {
+        let pi = &polygon_points[i];
+        let pj = &polygon_points[j];
+
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+
+    inside
+}
+
+/// Find the index of the topmost polygon that contains the given point
+/// Returns None if no polygon contains the point
+pub fn find_polygon_at_point(polygons: &[Polygon], point: &Point) -> Option<usize> {
+    // Iterate in reverse to get topmost (last rendered) polygon first
+    for (idx, polygon) in polygons.iter().enumerate().rev() {
+        let points = parse_points(&polygon.points);
+        if point_in_polygon(point, &points) {
+            return Some(idx);
+        }
+    }
+    None
+}
