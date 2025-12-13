@@ -32,6 +32,10 @@ pub struct OverlayProps {
     /// Handle mouse down on resize handle
     #[prop_or_default]
     pub on_handle_mousedown: Callback<(HandleName, MouseEvent)>,
+
+    /// Handle mouse down on bounding box (for moving selection)
+    #[prop_or_default]
+    pub on_bbox_mousedown: Callback<MouseEvent>,
 }
 
 /// SVG overlay for UI controls (selection handles, guidelines, etc.)
@@ -90,17 +94,27 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
             })
             .collect();
 
+        // Create bounding box mousedown handler
+        let on_bbox_mousedown = props.on_bbox_mousedown.clone();
+        let bbox_onmousedown = Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            e.stop_propagation();
+            on_bbox_mousedown.emit(e);
+        });
+
         html! {
             <>
-                // Selection bounding box
+                // Clickable bounding box area (for moving selection)
                 <rect
                     x={format!("{}", bbox.min.x)}
                     y={format!("{}", bbox.min.y)}
                     width={format!("{}", bbox.width())}
                     height={format!("{}", bbox.height())}
-                    fill="none"
+                    fill="transparent"
                     stroke="#0d99ff"
                     stroke-width="1"
+                    style="cursor: move; pointer-events: all;"
+                    onmousedown={bbox_onmousedown}
                 />
                 // Resize handles
                 {handle_elements}

@@ -1335,6 +1335,7 @@ pub fn resizable_canvas() -> Html {
                                         onmousemove={on_gpu_mousemove.clone()}
                                         onmouseup={on_svg_mouseup.clone()}
                                         {on_handle_mousedown}
+                                        on_bbox_mousedown={on_bbox_mousedown.clone()}
                                         background_color={[0.0, 0.0, 0.0, 0.0]}
                                     />
                                     // Invisible SVG for coordinate conversion (needed for mouse events)

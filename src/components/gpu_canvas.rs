@@ -58,6 +58,10 @@ pub struct GpuCanvasProps {
     #[prop_or_default]
     pub on_handle_mousedown: Callback<(HandleName, MouseEvent)>,
 
+    /// Bounding box mouse down callback (for moving selection)
+    #[prop_or_default]
+    pub on_bbox_mousedown: Callback<MouseEvent>,
+
     /// Background color [r, g, b, a] (0.0 - 1.0)
     /// Default is white with full opacity to match SVG canvas
     #[prop_or([1.0, 1.0, 1.0, 1.0])]
@@ -186,6 +190,7 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
                 width={props.width as f64}
                 height={props.height as f64}
                 on_handle_mousedown={props.on_handle_mousedown.clone()}
+                on_bbox_mousedown={props.on_bbox_mousedown.clone()}
             />
         </div>
     }
