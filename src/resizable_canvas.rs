@@ -58,12 +58,13 @@ fn polygons_to_shapes(
             let is_hovered = hovered_id == Some(idx);
 
             // Determine stroke based on hover state
+            // Always ensure a stroke is present - default to black if polygon stroke is invalid
             let stroke_color = if is_hovered {
-                scene::Color::from_hex("#3b82f6") // Blue hover color
+                Some(scene::Color::from_hex("#3b82f6").unwrap_or(scene::Color::black()))
             } else {
-                scene::Color::from_hex(&polygon.stroke)
+                Some(scene::Color::from_hex(&polygon.stroke).unwrap_or(scene::Color::black()))
             };
-            let stroke_width = if is_hovered { 2.0 } else { polygon.stroke_width as f32 };
+            let stroke_width = if is_hovered { 2.0 } else { polygon.stroke_width.max(1.0) as f32 };
 
             if is_selected {
                 // Apply transform to selected polygons
@@ -94,7 +95,7 @@ fn polygons_to_shapes(
 
                 Shape::new(ShapeGeometry::Polygon { points: transformed_points }, style)
             } else {
-                // Non-selected polygon with hover styling
+                // Non-selected polygon with stroke
                 let points: Vec<Vec2> = parse_points(&polygon.points)
                     .iter()
                     .map(|p| Vec2::new(p.x as f32, p.y as f32))
@@ -575,6 +576,7 @@ pub fn resizable_canvas() -> Html {
         let polygons = polygons.clone();
         let preview_bbox = preview_bbox.clone();
         let hovered_id = hovered_id.clone();
+        let selected_ids = selected_ids.clone();
 
         Callback::from(move |e: MouseEvent| {
             if let Some(svg) = svg_ref.cast::<SvgsvgElement>() {
@@ -606,9 +608,17 @@ pub fn resizable_canvas() -> Html {
                     }
                 } else {
                     // Not in marquee mode - do hit testing for hover
-                    let new_hovered = find_polygon_at_point(&polygons, &point);
-                    if new_hovered != *hovered_id {
-                        hovered_id.set(new_hovered);
+                    // Don't show hover for individual shapes when a group is selected
+                    if selected_ids.is_empty() {
+                        let new_hovered = find_polygon_at_point(&polygons, &point);
+                        if new_hovered != *hovered_id {
+                            hovered_id.set(new_hovered);
+                        }
+                    } else {
+                        // Clear hover when group is selected
+                        if hovered_id.is_some() {
+                            hovered_id.set(None);
+                        }
                     }
                 }
             }
@@ -637,21 +647,33 @@ pub fn resizable_canvas() -> Html {
 
                 // Check if clicked on a shape
                 if let Some(idx) = find_polygon_at_point(&polygons, &point) {
-                    // Select the clicked shape
-                    let poly = &polygons[idx];
-                    let bbox = calculate_bounding_box(&[poly.clone()]);
+                    // Check if clicked shape is already part of current selection
+                    let is_already_selected = selected_ids.contains(&idx);
 
-                    selected_ids.set(vec![idx]);
-                    let anchor = Point::new(bbox.x, bbox.y);
-                    fixed_anchor.set(anchor);
-                    dimensions.set(Dimensions::new(bbox.width, bbox.height));
-                    base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
-                    translation.replace(Point::new(0.0, 0.0));
+                    if is_already_selected && selected_ids.len() > 0 {
+                        // Clicked on an already-selected shape - move the entire group
+                        // Don't change selection, just start moving
+                        let anchor = *fixed_anchor;
+                        move_start.replace(Some((point, anchor)));
+                        is_moving.set(true);
+                        hovered_id.set(None);
+                    } else {
+                        // Clicked on a new shape - select just this one
+                        let poly = &polygons[idx];
+                        let bbox = calculate_bounding_box(&[poly.clone()]);
 
-                    // Start moving immediately
-                    move_start.replace(Some((point, anchor)));
-                    is_moving.set(true);
-                    hovered_id.set(None);
+                        selected_ids.set(vec![idx]);
+                        let anchor = Point::new(bbox.x, bbox.y);
+                        fixed_anchor.set(anchor);
+                        dimensions.set(Dimensions::new(bbox.width, bbox.height));
+                        base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
+                        translation.replace(Point::new(0.0, 0.0));
+
+                        // Start moving immediately
+                        move_start.replace(Some((point, anchor)));
+                        is_moving.set(true);
+                        hovered_id.set(None);
+                    }
                 } else {
                     // Clicked on empty space - start marquee selection
                     selection_rect.set(Some(SelectionRect::new(point, point)));
