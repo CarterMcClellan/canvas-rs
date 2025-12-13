@@ -163,8 +163,8 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
 
     html! {
         <div
-            class="relative canvas-dots"
-            style={format!("width: {}px; height: {}px; background-color: white; border: 1px solid #ccc;", props.width, props.height)}
+            class="canvas-dots"
+            style={format!("position: relative; width: {}px; height: {}px; background-color: white; border: 1px solid #ccc;", props.width, props.height)}
         >
             // GPU canvas for shape rendering - transparent so container background shows through
             <canvas

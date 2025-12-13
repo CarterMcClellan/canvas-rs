@@ -188,8 +188,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
 
     html! {
         <svg
-            class="absolute inset-0 pointer-events-none"
-            style="z-index: 10;"
+            style="position: absolute; top: 0; left: 0; z-index: 10; pointer-events: none;"
             width={format!("{}", props.width)}
             height={format!("{}", props.height)}
             viewBox={format!("0 0 {} {}", props.width, props.height)}
