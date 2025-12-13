@@ -8,6 +8,7 @@ mod properties_panel;
 mod chat_panel;
 
 // GPU rendering modules (Phase 1+)
+pub mod components;
 pub mod gpu;
 pub mod scene;
 

@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 /// Scene graph for managing shapes
 /// Provides efficient shape management with dirty tracking for rendering
+#[derive(Clone, PartialEq)]
 pub struct SceneGraph {
     /// All shapes in the scene
     shapes: Vec<Shape>,

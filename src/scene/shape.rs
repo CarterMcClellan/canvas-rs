@@ -112,7 +112,7 @@ impl ShapeGeometry {
 }
 
 /// A shape in the scene graph
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Shape {
     /// Unique identifier
     pub id: u64,
