@@ -101,17 +101,56 @@ impl ShapeGeometry {
             }
             ShapeGeometry::Ellipse { rx, ry } => BBox::new(Vec2::new(-*rx, -*ry), Vec2::new(*rx, *ry)),
             ShapeGeometry::Path { commands } => {
-                let points: Vec<Vec2> = commands
-                    .iter()
-                    .filter_map(|cmd| match cmd {
-                        PathCommand::MoveTo(p) => Some(*p),
-                        PathCommand::LineTo(p) => Some(*p),
-                        PathCommand::QuadraticTo { to, .. } => Some(*to),
-                        PathCommand::CubicTo { to, .. } => Some(*to),
-                        PathCommand::ArcTo { to, .. } => Some(*to),
-                        PathCommand::Close => None,
-                    })
-                    .collect();
+                let mut points: Vec<Vec2> = Vec::new();
+                let mut current_pos = Vec2::ZERO;
+
+                for cmd in commands {
+                    match cmd {
+                        PathCommand::MoveTo(p) => {
+                            points.push(*p);
+                            current_pos = *p;
+                        }
+                        PathCommand::LineTo(p) => {
+                            points.push(*p);
+                            current_pos = *p;
+                        }
+                        PathCommand::QuadraticTo { control, to } => {
+                            // Include control point for proper bounds
+                            points.push(*control);
+                            points.push(*to);
+                            current_pos = *to;
+                        }
+                        PathCommand::CubicTo { ctrl1, ctrl2, to } => {
+                            // Include both control points for proper bounds
+                            points.push(*ctrl1);
+                            points.push(*ctrl2);
+                            points.push(*to);
+                            current_pos = *to;
+                        }
+                        PathCommand::ArcTo { rx, ry, to, .. } => {
+                            // For arcs, be extremely conservative with bounds
+                            // Arcs can curve far from the direct path between endpoints
+                            points.push(*to);
+
+                            // Use 2x the larger radius as margin
+                            let max_r = rx.max(*ry) * 2.0;
+
+                            // Add all 4 corners around both endpoints
+                            points.push(Vec2::new(current_pos.x - max_r, current_pos.y - max_r));
+                            points.push(Vec2::new(current_pos.x + max_r, current_pos.y - max_r));
+                            points.push(Vec2::new(current_pos.x - max_r, current_pos.y + max_r));
+                            points.push(Vec2::new(current_pos.x + max_r, current_pos.y + max_r));
+
+                            points.push(Vec2::new(to.x - max_r, to.y - max_r));
+                            points.push(Vec2::new(to.x + max_r, to.y - max_r));
+                            points.push(Vec2::new(to.x - max_r, to.y + max_r));
+                            points.push(Vec2::new(to.x + max_r, to.y + max_r));
+
+                            current_pos = *to;
+                        }
+                        PathCommand::Close => {}
+                    }
+                }
                 BBox::from_points(&points).unwrap_or(BBox::new(Vec2::ZERO, Vec2::ZERO))
             }
         }
