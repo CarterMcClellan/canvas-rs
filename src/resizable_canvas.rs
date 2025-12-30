@@ -12,6 +12,7 @@ use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
 use crate::components::GpuCanvas;
 use crate::scene::{self, Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox};
+use crate::demo_paths::create_demo_shapes;
 
 /// Convert polygons to shapes for GPU rendering, applying transform to selected ones
 fn polygons_to_shapes(
@@ -991,7 +992,7 @@ pub fn resizable_canvas() -> Html {
     };
 
     // GPU rendering - prepare shapes and state for rendering
-    let shapes = polygons_to_shapes(
+    let mut shapes = polygons_to_shapes(
         &polygons,
         &selected_ids,
         *hovered_id,
@@ -1000,6 +1001,9 @@ pub fn resizable_canvas() -> Html {
         scale_x,
         scale_y,
     );
+
+    // Add demo shapes (Snoopy, heart, star, flower, spiral) to showcase SVG path rendering
+    shapes.extend(create_demo_shapes());
 
     let selection_bbox_gpu = if has_selection {
         Some(bbox_to_scene_bbox(&bounding_box))
