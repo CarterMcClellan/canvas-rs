@@ -16,6 +16,20 @@ pub enum PathCommand {
     LineTo(Vec2),
     QuadraticTo { control: Vec2, to: Vec2 },
     CubicTo { ctrl1: Vec2, ctrl2: Vec2, to: Vec2 },
+    /// Elliptical arc command (SVG A/a command)
+    /// rx, ry: radii of the ellipse
+    /// x_rotation: rotation of the ellipse in degrees
+    /// large_arc: if true, use the larger arc
+    /// sweep: if true, draw arc in positive angle direction
+    /// to: end point
+    ArcTo {
+        rx: f32,
+        ry: f32,
+        x_rotation: f32,
+        large_arc: bool,
+        sweep: bool,
+        to: Vec2,
+    },
     Close,
 }
 
@@ -94,6 +108,7 @@ impl ShapeGeometry {
                         PathCommand::LineTo(p) => Some(*p),
                         PathCommand::QuadraticTo { to, .. } => Some(*to),
                         PathCommand::CubicTo { to, .. } => Some(*to),
+                        PathCommand::ArcTo { to, .. } => Some(*to),
                         PathCommand::Close => None,
                     })
                     .collect();
