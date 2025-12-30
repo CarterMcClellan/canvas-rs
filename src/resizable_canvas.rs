@@ -1028,14 +1028,15 @@ pub fn resizable_canvas() -> Html {
         })
     };
 
-    // Define path shapes for the layers panel
-    let path_shapes = vec![
-        PathShapeInfo { name: "Snoopy".to_string(), color: "#ffffff".to_string() },
-        PathShapeInfo { name: "Heart".to_string(), color: "#ff3366".to_string() },
-        PathShapeInfo { name: "Star".to_string(), color: "#ffcc00".to_string() },
-        PathShapeInfo { name: "Flower".to_string(), color: "#ff66b2".to_string() },
-        PathShapeInfo { name: "Spiral".to_string(), color: "#3388ff".to_string() },
-    ];
+    // Generate layer entries for each demo shape (each path gets its own entry)
+    let demo_shapes = create_demo_shapes();
+    let path_shapes: Vec<PathShapeInfo> = demo_shapes.iter().map(|shape| {
+        let color = shape.style.fill
+            .as_ref()
+            .map(|c| c.to_hex())
+            .unwrap_or_else(|| "#cccccc".to_string());
+        PathShapeInfo { name: "Path".to_string(), color }
+    }).collect();
 
     html! {
         <div class="flex w-full h-screen overflow-hidden">
