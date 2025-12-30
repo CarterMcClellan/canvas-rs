@@ -9,27 +9,53 @@ use crate::scene::{parse_svg_path, Shape, ShapeGeometry, ShapeStyle, StrokeStyle
 pub fn create_snoopy_shapes(offset_x: f32, offset_y: f32, scale: f32) -> Vec<Shape> {
     let mut shapes = Vec::new();
 
-    // Snoopy's body (main outline) - simplified stylized version
-    let body_path = "M 50 120
-        C 30 120 10 100 10 70
-        C 10 40 30 20 60 20
-        C 90 20 100 40 100 55
-        C 100 60 95 65 90 65
-        C 85 65 82 60 82 55
-        C 82 50 85 45 90 45
-        C 95 45 100 50 100 55
-        C 100 70 90 85 75 95
-        C 75 100 80 110 80 115
-        C 80 120 75 125 70 125
-        L 55 125
-        C 50 125 45 120 45 115
-        C 45 110 50 100 50 95
-        C 35 90 25 100 25 115
-        C 25 120 30 125 35 125
-        L 20 125
-        C 15 125 10 120 10 115
-        C 10 110 15 100 30 95
-        C 20 90 10 95 10 70
+    // Snoopy's head (simple rounded shape - no self-intersections)
+    let head_path = "M 20 60
+        C 20 30 40 15 70 15
+        C 95 15 105 35 105 55
+        C 105 75 90 90 70 90
+        C 50 90 20 85 20 60
+        Z";
+
+    let head_cmds = parse_svg_path(head_path);
+    let head_shape = Shape::new(
+        ShapeGeometry::Path { commands: head_cmds },
+        ShapeStyle::fill_and_stroke(
+            Color::rgb(1.0, 1.0, 1.0),
+            StrokeStyle::new(Color::black(), 2.0),
+        ),
+    ).with_transform(Transform2D::identity()
+        .with_position(Vec2::new(offset_x, offset_y))
+        .with_scale(Vec2::new(scale, scale)));
+    shapes.push(head_shape);
+
+    // Snoopy's snout (elongated shape on the left)
+    let snout_path = "M 20 55
+        C 20 45 10 45 5 50
+        C 0 55 0 65 5 70
+        C 10 75 20 75 25 70
+        C 30 65 30 55 20 55
+        Z";
+
+    let snout_cmds = parse_svg_path(snout_path);
+    let snout_shape = Shape::new(
+        ShapeGeometry::Path { commands: snout_cmds },
+        ShapeStyle::fill_and_stroke(
+            Color::rgb(1.0, 1.0, 1.0),
+            StrokeStyle::new(Color::black(), 2.0),
+        ),
+    ).with_transform(Transform2D::identity()
+        .with_position(Vec2::new(offset_x, offset_y))
+        .with_scale(Vec2::new(scale, scale)));
+    shapes.push(snout_shape);
+
+    // Snoopy's body (below head)
+    let body_path = "M 45 88
+        C 35 90 30 100 30 115
+        C 30 125 40 130 55 130
+        L 75 130
+        C 90 130 100 125 100 115
+        C 100 100 90 90 80 88
         Z";
 
     let body_cmds = parse_svg_path(body_path);
@@ -44,12 +70,12 @@ pub fn create_snoopy_shapes(offset_x: f32, offset_y: f32, scale: f32) -> Vec<Sha
         .with_scale(Vec2::new(scale, scale)));
     shapes.push(body_shape);
 
-    // Snoopy's ear (black)
-    let ear_path = "M 85 25
-        C 95 15 110 20 115 35
-        C 120 50 110 65 95 60
-        C 95 55 98 50 100 45
-        C 95 45 88 35 85 25
+    // Snoopy's ear (black, floppy)
+    let ear_path = "M 90 25
+        C 100 20 115 25 120 40
+        C 125 55 115 70 100 65
+        C 95 63 92 55 95 45
+        C 97 35 95 28 90 25
         Z";
 
     let ear_cmds = parse_svg_path(ear_path);
@@ -62,40 +88,28 @@ pub fn create_snoopy_shapes(offset_x: f32, offset_y: f32, scale: f32) -> Vec<Sha
     shapes.push(ear_shape);
 
     // Snoopy's nose (black oval)
-    let nose_path = "M 12 55
-        A 8 6 0 1 1 12 67
-        A 8 6 0 1 1 12 55
-        Z";
-
-    let nose_cmds = parse_svg_path(nose_path);
     let nose_shape = Shape::new(
-        ShapeGeometry::Path { commands: nose_cmds },
+        ShapeGeometry::Ellipse { rx: 7.0, ry: 5.0 },
         ShapeStyle::fill_only(Color::black()),
     ).with_transform(Transform2D::identity()
-        .with_position(Vec2::new(offset_x, offset_y))
+        .with_position(Vec2::new(offset_x + 5.0 * scale, offset_y + 60.0 * scale))
         .with_scale(Vec2::new(scale, scale)));
     shapes.push(nose_shape);
 
-    // Snoopy's eye
-    let eye_path = "M 45 45
-        A 4 4 0 1 1 45 53
-        A 4 4 0 1 1 45 45
-        Z";
-
-    let eye_cmds = parse_svg_path(eye_path);
+    // Snoopy's eye (small black dot)
     let eye_shape = Shape::new(
-        ShapeGeometry::Path { commands: eye_cmds },
+        ShapeGeometry::Ellipse { rx: 4.0, ry: 4.0 },
         ShapeStyle::fill_only(Color::black()),
     ).with_transform(Transform2D::identity()
-        .with_position(Vec2::new(offset_x, offset_y))
+        .with_position(Vec2::new(offset_x + 50.0 * scale, offset_y + 45.0 * scale))
         .with_scale(Vec2::new(scale, scale)));
     shapes.push(eye_shape);
 
-    // Snoopy's collar (red)
-    let collar_path = "M 50 95
-        Q 60 98 75 95
-        L 75 100
-        Q 60 103 50 100
+    // Snoopy's collar (red band)
+    let collar_path = "M 40 88
+        Q 62 92 85 88
+        L 85 95
+        Q 62 99 40 95
         Z";
 
     let collar_cmds = parse_svg_path(collar_path);
