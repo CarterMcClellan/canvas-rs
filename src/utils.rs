@@ -111,3 +111,18 @@ pub fn find_polygon_at_point(polygons: &[Polygon], point: &Point) -> Option<usiz
     }
     None
 }
+
+use crate::scene::{Shape, Vec2};
+
+/// Find the index of the topmost shape that contains the given point
+/// Returns None if no shape contains the point
+pub fn find_shape_at_point(shapes: &[Shape], point: &Point) -> Option<usize> {
+    let vec2_point = Vec2::new(point.x as f32, point.y as f32);
+    // Iterate in reverse to get topmost (last rendered) shape first
+    for (idx, shape) in shapes.iter().enumerate().rev() {
+        if shape.contains_point(vec2_point) {
+            return Some(idx);
+        }
+    }
+    None
+}
