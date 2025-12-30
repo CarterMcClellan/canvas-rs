@@ -128,23 +128,23 @@ impl ShapeGeometry {
                             current_pos = *to;
                         }
                         PathCommand::ArcTo { rx, ry, to, .. } => {
-                            // For arcs, be extremely conservative with bounds
-                            // Arcs can curve far from the direct path between endpoints
+                            // For arcs, the maximum extent from the chord is the radius
+                            // We expand by the radius in all directions from the midpoint
+                            // of the chord to capture the arc's bulge
                             points.push(*to);
 
-                            // Use 2x the larger radius as margin
-                            let max_r = rx.max(*ry) * 2.0;
+                            let max_r = rx.max(*ry);
 
-                            // Add all 4 corners around both endpoints
-                            points.push(Vec2::new(current_pos.x - max_r, current_pos.y - max_r));
-                            points.push(Vec2::new(current_pos.x + max_r, current_pos.y - max_r));
-                            points.push(Vec2::new(current_pos.x - max_r, current_pos.y + max_r));
-                            points.push(Vec2::new(current_pos.x + max_r, current_pos.y + max_r));
+                            // Calculate midpoint of the chord
+                            let mid_x = (current_pos.x + to.x) / 2.0;
+                            let mid_y = (current_pos.y + to.y) / 2.0;
 
-                            points.push(Vec2::new(to.x - max_r, to.y - max_r));
-                            points.push(Vec2::new(to.x + max_r, to.y - max_r));
-                            points.push(Vec2::new(to.x - max_r, to.y + max_r));
-                            points.push(Vec2::new(to.x + max_r, to.y + max_r));
+                            // Add corners around the midpoint expanded by radius
+                            // This captures the arc's bulge from the chord
+                            points.push(Vec2::new(mid_x - max_r, mid_y - max_r));
+                            points.push(Vec2::new(mid_x + max_r, mid_y - max_r));
+                            points.push(Vec2::new(mid_x - max_r, mid_y + max_r));
+                            points.push(Vec2::new(mid_x + max_r, mid_y + max_r));
 
                             current_pos = *to;
                         }
