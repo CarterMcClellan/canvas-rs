@@ -7,7 +7,7 @@ use std::rc::Rc;
 use crate::types::*;
 use crate::utils::*;
 use crate::snap_logic::calculate_snap;
-use crate::layers_panel::LayersPanel;
+use crate::layers_panel::{LayersPanel, ShapeGroupInfo};
 use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
 use crate::components::GpuCanvas;
@@ -1028,6 +1028,15 @@ pub fn resizable_canvas() -> Html {
         })
     };
 
+    // Define shape groups for the demo shapes
+    let shape_groups = vec![
+        ShapeGroupInfo { name: "Snoopy".to_string(), color: "#ffffff".to_string(), icon: "🐕".to_string() },
+        ShapeGroupInfo { name: "Heart".to_string(), color: "#ff3366".to_string(), icon: "❤".to_string() },
+        ShapeGroupInfo { name: "Star".to_string(), color: "#ffcc00".to_string(), icon: "⭐".to_string() },
+        ShapeGroupInfo { name: "Flower".to_string(), color: "#ff66b2".to_string(), icon: "🌸".to_string() },
+        ShapeGroupInfo { name: "Spiral".to_string(), color: "#3388ff".to_string(), icon: "🌀".to_string() },
+    ];
+
     html! {
         <div class="flex w-full h-screen overflow-hidden">
             // Layers Panel (Left)
@@ -1035,6 +1044,7 @@ pub fn resizable_canvas() -> Html {
                 polygons={(*polygons).clone()}
                 selected_ids={(*selected_ids).clone()}
                 on_select={on_polygon_click.clone()}
+                shape_groups={shape_groups}
             />
 
             // Main Canvas Area (Center)
