@@ -7,12 +7,11 @@ use std::collections::HashMap;
 
 use crate::types::*;
 use crate::utils::*;
-use crate::snap_logic::calculate_snap;
 use crate::layers_panel::{LayersPanel, ShapeInfo};
 use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
 use crate::components::GpuCanvas;
-use crate::scene::{self, Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox, Color, Transform2D};
+use crate::scene::{Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox, Color, Transform2D};
 use crate::demo_paths::create_demo_shapes;
 
 /// Compute GPU transform overrides for selected shapes during drag/scale operations
@@ -68,62 +67,6 @@ fn compute_transform_overrides(
     overrides
 }
 
-/// Apply visual transform to shapes for GPU rendering (selected shapes get preview transform)
-/// DEPRECATED: Use compute_transform_overrides with GpuCanvas transform_overrides prop instead
-#[allow(dead_code)]
-fn apply_selection_transform(
-    shapes: &[Shape],
-    selected_ids: &[usize],
-    hovered_id: Option<usize>,
-    fixed_anchor: &Point,
-    translation: &Point,
-    scale_x: f64,
-    scale_y: f64,
-) -> Vec<Shape> {
-    shapes
-        .iter()
-        .enumerate()
-        .map(|(idx, shape)| {
-            let is_selected = selected_ids.contains(&idx);
-            let is_hovered = hovered_id == Some(idx);
-
-            let mut new_shape = shape.clone();
-
-            // Update stroke for hover state
-            if is_hovered {
-                let hover_stroke = StrokeStyle::new(
-                    scene::Color::from_hex("#3b82f6").unwrap_or(scene::Color::black()),
-                    2.0,
-                );
-                new_shape.style.stroke = Some(hover_stroke);
-            }
-
-            if is_selected {
-                // Apply preview transform for selected shapes
-                let origin = Vec2::new(fixed_anchor.x as f32, fixed_anchor.y as f32);
-                let current_pos = shape.transform.position;
-
-                // Calculate new position relative to anchor
-                let local_x = current_pos.x - origin.x;
-                let local_y = current_pos.y - origin.y;
-                let new_x = origin.x + translation.x as f32 + local_x * scale_x as f32;
-                let new_y = origin.y + translation.y as f32 + local_y * scale_y as f32;
-
-                // Create new transform with updated position and scale
-                let current_scale = shape.transform.scale;
-                new_shape.transform = Transform2D::identity()
-                    .with_position(Vec2::new(new_x, new_y))
-                    .with_scale(Vec2::new(
-                        current_scale.x * scale_x as f32,
-                        current_scale.y * scale_y as f32,
-                    ));
-            }
-
-            new_shape
-        })
-        .collect()
-}
-
 /// Convert old BoundingBox to new BBox for GPU rendering
 fn bbox_to_scene_bbox(bbox: &BoundingBox) -> BBox {
     BBox::new(
@@ -154,29 +97,32 @@ fn get_initial_shapes() -> Vec<Shape> {
     let mut shapes = Vec::new();
 
     // Triangle 1 (red)
+    let red = Color::from_hex("#ff6347").unwrap_or_else(Color::black);
     shapes.push(create_triangle_shape(
         Vec2::new(230.0, 220.0),
         Vec2::new(260.0, 220.0),
         Vec2::new(245.0, 250.0),
-        Color::from_hex("#ff6347").unwrap_or(Color::black()),
+        red,
         Color::black(),
     ));
 
     // Triangle 2 (blue)
+    let blue = Color::from_hex("#4682b4").unwrap_or_else(Color::black);
     shapes.push(create_triangle_shape(
         Vec2::new(270.0, 230.0),
         Vec2::new(300.0, 230.0),
         Vec2::new(285.0, 260.0),
-        Color::from_hex("#4682b4").unwrap_or(Color::black()),
+        blue,
         Color::black(),
     ));
 
     // Triangle 3 (green)
+    let green = Color::from_hex("#9acd32").unwrap_or_else(Color::black);
     shapes.push(create_triangle_shape(
         Vec2::new(240.0, 270.0),
         Vec2::new(270.0, 270.0),
         Vec2::new(255.0, 300.0),
-        Color::from_hex("#9acd32").unwrap_or(Color::black()),
+        green,
         Color::black(),
     ));
 
@@ -273,8 +219,6 @@ pub fn resizable_canvas() -> Html {
 
     // Calculated values
     let has_selection = !selected_ids.is_empty();
-    let has_base_ref = resize_base_signed.borrow().is_some();
-    let has_curr_ref = resize_current_dims.borrow().is_some();
     let base_signed_dims = resize_base_signed
         .borrow()
         .as_ref()
@@ -286,15 +230,13 @@ pub fn resizable_canvas() -> Html {
         .as_ref()
         .cloned()
         .unwrap_or_else(|| Dimensions::new(dimensions.width, dimensions.height));
-    let scale_x = if has_selection {
-        current_dims.width / base_signed_dims.width
+    let (scale_x, scale_y) = if has_selection {
+        (
+            current_dims.width / base_signed_dims.width,
+            current_dims.height / base_signed_dims.height,
+        )
     } else {
-        1.0
-    };
-    let scale_y = if has_selection {
-        current_dims.height / base_signed_dims.height
-    } else {
-        1.0
+        (1.0, 1.0)
     };
 
     let trans = *translation.borrow();
@@ -358,14 +300,14 @@ pub fn resizable_canvas() -> Html {
                 return;
             }
 
-            let selected_shapes: Vec<&Shape> = shapes
+            let selected_shapes: Vec<Shape> = shapes
                 .iter()
                 .enumerate()
                 .filter(|(idx, _)| ids.contains(idx))
-                .map(|(_, s)| s)
+                .map(|(_, s)| s.clone())
                 .collect();
 
-            let bbox = calculate_shapes_bounding_box(&selected_shapes.iter().cloned().cloned().collect::<Vec<_>>());
+            let bbox = calculate_shapes_bounding_box(&selected_shapes);
             selected_ids.set(ids);
             fixed_anchor.set(Point::new(bbox.x, bbox.y));
             dimensions.set(Dimensions::new(bbox.width, bbox.height));
@@ -379,15 +321,6 @@ pub fn resizable_canvas() -> Html {
         })
     };
 
-    // Test helper: select all shapes when invoked
-    let _on_select_all = {
-        let set_selection = set_selection_from_ids.clone();
-        let shapes = shapes.clone();
-        Callback::from(move |_: MouseEvent| {
-            let all_ids: Vec<usize> = (0..shapes.len()).collect();
-            set_selection.emit(all_ids);
-        })
-    };
 
     // Commit transform - permanently applies translation/scale to selected shapes
     let commit_selection_transform = {
@@ -424,15 +357,13 @@ pub fn resizable_canvas() -> Html {
                 .cloned()
                 .unwrap_or_else(|| Dimensions::new(dimensions.width, dimensions.height));
 
-            let current_scale_x = if selected_ids.is_empty() {
-                1.0
+            let (current_scale_x, current_scale_y) = if selected_ids.is_empty() {
+                (1.0, 1.0)
             } else {
-                current_dims.width / signed_base.width
-            };
-            let current_scale_y = if selected_ids.is_empty() {
-                1.0
-            } else {
-                current_dims.height / signed_base.height
+                (
+                    current_dims.width / signed_base.width,
+                    current_dims.height / signed_base.height,
+                )
             };
 
             let origin = Vec2::new(fixed_anchor.x as f32, fixed_anchor.y as f32);
@@ -514,21 +445,10 @@ pub fn resizable_canvas() -> Html {
     };
 
     // Property update handlers (stubbed for now - would need to update selected polygon)
-    let on_update_fill = Callback::from(|_fill: String| {
-        // TODO: Update selected polygon fill
-    });
-
-    let on_update_stroke = Callback::from(|_stroke: String| {
-        // TODO: Update selected polygon stroke
-    });
-
-    let on_update_position = Callback::from(|_pos: (f64, f64)| {
-        // TODO: Update selected polygon position
-    });
-
-    let on_update_dimensions = Callback::from(|_dims: (f64, f64)| {
-        // TODO: Update selected polygon dimensions
-    });
+    let on_update_fill = Callback::from(|_fill: String| {});
+    let on_update_stroke = Callback::from(|_stroke: String| {});
+    let on_update_position = Callback::from(|_pos: (f64, f64)| {});
+    let on_update_dimensions = Callback::from(|_dims: (f64, f64)| {});
 
     // Commit marquee selection when mouseup occurs
     let on_svg_mouseup = {
@@ -660,7 +580,7 @@ pub fn resizable_canvas() -> Html {
                     // Check if clicked shape is already part of current selection
                     let is_already_selected = selected_ids.contains(&idx);
 
-                    if is_already_selected && selected_ids.len() > 0 {
+                    if is_already_selected && !selected_ids.is_empty() {
                         // Clicked on an already-selected shape - move the entire group
                         // Don't change selection, just start moving
                         let anchor = *fixed_anchor;
@@ -711,34 +631,29 @@ pub fn resizable_canvas() -> Html {
             // Commit any existing translation
             let trans = *translation.borrow();
             if trans.x != 0.0 || trans.y != 0.0 {
-                web_sys::console::log_1(&"HANDLE MOUSEDOWN: committing existing translation".into());
                 commit_fn.emit(());
             }
 
             let start_anchor = *fixed_anchor;
             let base_dims = *base_dimensions_handle;
-            let anchor_x = if matches!(handle, HandleName::Left | HandleName::BottomLeft | HandleName::TopLeft) {
+
+            let is_left = matches!(handle, HandleName::Left | HandleName::BottomLeft | HandleName::TopLeft);
+            let is_top = matches!(handle, HandleName::Top | HandleName::TopLeft | HandleName::TopRight);
+
+            let anchor_x = if is_left {
                 start_anchor.x + base_dims.width
             } else {
                 start_anchor.x
             };
-            let anchor_y = if matches!(handle, HandleName::Top | HandleName::TopLeft | HandleName::TopRight) {
+            let anchor_y = if is_top {
                 start_anchor.y + base_dims.height
             } else {
                 start_anchor.y
             };
 
             let signed_base = Dimensions::new(
-                if matches!(handle, HandleName::Left | HandleName::BottomLeft | HandleName::TopLeft) {
-                    -base_dims.width
-                } else {
-                    base_dims.width
-                },
-                if matches!(handle, HandleName::Top | HandleName::TopLeft | HandleName::TopRight) {
-                    -base_dims.height
-                } else {
-                    base_dims.height
-                },
+                if is_left { -base_dims.width } else { base_dims.width },
+                if is_top { -base_dims.height } else { base_dims.height },
             );
 
             let anchor_point = Point::new(anchor_x, anchor_y);
@@ -894,12 +809,8 @@ pub fn resizable_canvas() -> Html {
         let is_moving = is_moving.clone();
         let svg_ref = svg_ref.clone();
         let move_start = move_start.clone();
-        let fixed_anchor = fixed_anchor.clone();
-        let dimensions = dimensions.clone();
         let translation = translation.clone();
         let translation_state = translation_state.clone();
-        let shapes_for_snap = shapes.clone();
-        let selected_ids = selected_ids.clone();
         let guidelines = guidelines.clone();
         let commit_transform = commit_selection_transform.clone();
 
@@ -916,11 +827,6 @@ pub fn resizable_canvas() -> Html {
                 let move_start = move_start.clone();
                 let translation = translation.clone();
                 let translation_state = translation_state.clone();
-                let fixed_anchor = fixed_anchor.clone();
-                let dimensions = dimensions.clone();
-                let _shapes_for_snap = shapes_for_snap.clone();
-                let _selected_ids = selected_ids.clone();
-                let _guidelines = guidelines.clone();
 
                 EventListener::new(&window, "mousemove", move |event| {
                     let mouse_event = event.dyn_ref::<MouseEvent>().unwrap();
@@ -931,14 +837,9 @@ pub fn resizable_canvas() -> Html {
                             let delta_x = point.x - start_point.x;
                             let delta_y = point.y - start_point.y;
 
-                            // Note: Snapping disabled for now - would need to update snap_logic
-                            // to work with shapes instead of polygons
-                            let _dims = *dimensions;
-                            let _anchor = *fixed_anchor;
-
                             let new_trans = Point::new(delta_x, delta_y);
                             *translation.borrow_mut() = new_trans;
-                            translation_state.set(new_trans);  // Trigger re-render for GPU transform
+                            translation_state.set(new_trans);
                         }
                     }
                 })

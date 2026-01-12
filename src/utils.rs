@@ -80,8 +80,8 @@ pub fn point_in_polygon(point: &Point, polygon_points: &[Point]) -> bool {
         return false;
     }
 
-    let mut inside = false;
     let n = polygon_points.len();
+    let mut inside = false;
     let mut j = n - 1;
 
     for i in 0..n {

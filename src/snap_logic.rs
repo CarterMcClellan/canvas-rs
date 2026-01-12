@@ -24,18 +24,14 @@ fn check_snap(
     current_min_dist: f64,
 ) -> Option<SnapCheck> {
     let dist = (value - target).abs();
-    if dist < current_min_dist && dist < threshold {
-        Some(SnapCheck {
-            dist,
-            snap_delta: target - value,
-            guideline_type,
-            pos: target,
-            start,
-            end,
-        })
-    } else {
-        None
-    }
+    (dist < current_min_dist && dist < threshold).then(|| SnapCheck {
+        dist,
+        snap_delta: target - value,
+        guideline_type,
+        pos: target,
+        start,
+        end,
+    })
 }
 
 fn parse_polygon_points(points_str: &str) -> Vec<Point> {

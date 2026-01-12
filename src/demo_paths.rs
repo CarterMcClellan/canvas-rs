@@ -233,7 +233,7 @@ pub fn create_spiral_shape(x: f32, y: f32, turns: u32, color: Color) -> Shape {
     let mut radius = 5.0f32;
     let mut angle = 0.0f32;
 
-    for i in 0..(turns * 4) {
+    for _ in 0..(turns * 4) {
         let next_angle = angle + std::f32::consts::PI / 2.0;
         let next_radius = radius + 5.0;
 

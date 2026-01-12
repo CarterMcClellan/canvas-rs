@@ -208,27 +208,10 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
         );
     }
 
-    // Mouse event handlers
-    let onmousedown = {
-        let callback = props.onmousedown.clone();
-        Callback::from(move |e: MouseEvent| {
-            callback.emit(e);
-        })
-    };
-
-    let onmousemove = {
-        let callback = props.onmousemove.clone();
-        Callback::from(move |e: MouseEvent| {
-            callback.emit(e);
-        })
-    };
-
-    let onmouseup = {
-        let callback = props.onmouseup.clone();
-        Callback::from(move |e: MouseEvent| {
-            callback.emit(e);
-        })
-    };
+    // Mouse event handlers - direct pass-through
+    let onmousedown = props.onmousedown.clone();
+    let onmousemove = props.onmousemove.clone();
+    let onmouseup = props.onmouseup.clone();
 
     // Determine cursor based on hover state
     let canvas_cursor = if props.is_shape_hovered { "pointer" } else { "default" };
