@@ -1,9 +1,14 @@
 use yew::prelude::*;
-use crate::types::Polygon;
+
+/// Represents a shape in the layers panel
+#[derive(Clone, PartialEq)]
+pub struct ShapeInfo {
+    pub color: String,
+}
 
 #[derive(Properties, PartialEq)]
 pub struct LayersPanelProps {
-    pub polygons: Vec<Polygon>,
+    pub shapes: Vec<ShapeInfo>,
     pub selected_ids: Vec<usize>,
     pub on_select: Callback<usize>,
 }
@@ -14,8 +19,9 @@ pub fn layers_panel(props: &LayersPanelProps) -> Html {
         <div class="w-64 flex-none bg-white border-r border-gray-300 p-4 overflow-y-auto">
             <h2 class="text-lg font-semibold pb-3 mb-4 border-b border-gray-200">{"Layers"}</h2>
             <div class="space-y-2">
+                // All shapes in unified list
                 {
-                    props.polygons.iter().enumerate().map(|(idx, polygon)| {
+                    props.shapes.iter().enumerate().map(|(idx, shape)| {
                         let is_selected = props.selected_ids.contains(&idx);
                         let on_select = props.on_select.clone();
                         let onclick = Callback::from(move |_| {
@@ -40,12 +46,15 @@ pub fn layers_panel(props: &LayersPanelProps) -> Html {
                                     if is_selected { "bg-blue-100 border-blue-300" } else { "bg-white" }
                                 )}
                             >
-                                <div
-                                    class="w-6 h-6 rounded border border-gray-300"
-                                    style={format!("background-color: {}", polygon.fill)}
-                                />
+                                <div class="w-6 h-6 rounded border border-gray-300 flex items-center justify-center"
+                                     style={format!("background-color: {}", shape.color)}>
+                                    // Shape icon (simple bezier curve SVG)
+                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M2 12 Q 7 2, 12 7" stroke-linecap="round"/>
+                                    </svg>
+                                </div>
                                 <span class="text-sm">
-                                    {format!("Polygon {}", idx)}
+                                    {format!("Shape {}", idx)}
                                 </span>
                             </div>
                         }

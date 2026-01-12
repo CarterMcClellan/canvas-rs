@@ -44,10 +44,12 @@ impl Vertex {
 pub struct Uniforms {
     /// 4x4 view-projection matrix (column-major)
     pub view_proj: [[f32; 4]; 4],
+    /// 4x4 model transform matrix (column-major) - applied per-shape
+    pub model_transform: [[f32; 4]; 4],
 }
 
 impl Uniforms {
-    /// Create uniforms for a 2D orthographic projection
+    /// Create uniforms for a 2D orthographic projection with identity model transform
     /// Maps canvas coordinates (0,0)-(width,height) to clip space (-1,-1)-(1,1)
     pub fn orthographic(width: f32, height: f32) -> Self {
         // Orthographic projection matrix
@@ -59,7 +61,59 @@ impl Uniforms {
             [0.0, 0.0, 1.0, 0.0],
             [-1.0, 1.0, 0.0, 1.0],
         ];
-        Self { view_proj }
+        Self {
+            view_proj,
+            model_transform: Self::identity_matrix(),
+        }
+    }
+
+    /// Create an identity 4x4 matrix
+    pub fn identity_matrix() -> [[f32; 4]; 4] {
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    }
+
+    /// Create a 2D translation matrix
+    pub fn translation_matrix(tx: f32, ty: f32) -> [[f32; 4]; 4] {
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [tx, ty, 0.0, 1.0],
+        ]
+    }
+
+    /// Create a 2D scale matrix around a pivot point
+    pub fn scale_around_point_matrix(sx: f32, sy: f32, pivot_x: f32, pivot_y: f32) -> [[f32; 4]; 4] {
+        // Translate to origin, scale, translate back
+        // Combined: T(pivot) * S(scale) * T(-pivot)
+        [
+            [sx, 0.0, 0.0, 0.0],
+            [0.0, sy, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [pivot_x * (1.0 - sx), pivot_y * (1.0 - sy), 0.0, 1.0],
+        ]
+    }
+
+    /// Create a combined translation and scale matrix around a pivot point
+    pub fn transform_matrix(tx: f32, ty: f32, sx: f32, sy: f32, pivot_x: f32, pivot_y: f32) -> [[f32; 4]; 4] {
+        // Combined transform: translate then scale around pivot
+        [
+            [sx, 0.0, 0.0, 0.0],
+            [0.0, sy, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [tx + pivot_x * (1.0 - sx), ty + pivot_y * (1.0 - sy), 0.0, 1.0],
+        ]
+    }
+
+    /// Set the model transform
+    pub fn with_model_transform(mut self, transform: [[f32; 4]; 4]) -> Self {
+        self.model_transform = transform;
+        self
     }
 }
 
