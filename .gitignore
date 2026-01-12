@@ -23,7 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Playwright (in tests/ directory)
+# Playwright
+test-results/
 tests/test-results/
 tests/playwright-report/
 tests/playwright/.cache/
