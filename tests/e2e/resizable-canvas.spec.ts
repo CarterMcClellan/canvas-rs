@@ -7,6 +7,8 @@ import {
   dragFromTo,
   startDragHandle,
   releaseMouse,
+  clickOnShape,
+  hoverOnShape,
 } from './helpers/canvas-helpers';
 import {
   assertSelectionState,
@@ -38,10 +40,8 @@ test.describe('ResizableCanvas E2E Tests', () => {
     });
 
     test('TC-2: Select single polygon by clicking', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const polygon1 = svg.locator('polygon').nth(0);
-
-      await polygon1.click();
+      // Click on shape 0 (red triangle) using canvas coordinates
+      await clickOnShape(page, 0);
 
       await assertSelectionState(page, [0]);
     });
@@ -77,29 +77,8 @@ test.describe('ResizableCanvas E2E Tests', () => {
       await page.mouse.up();
     });
 
-    test('TC-18: Polygon border changes on hover', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const offset = await getSVGOffset(page);
-      const polygon0 = svg.locator('polygon').nth(0);
-
-      // Initially, polygon should have black stroke and strokeWidth 1
-      await expect(polygon0).toHaveAttribute('stroke', 'black');
-      await expect(polygon0).toHaveAttribute('stroke-width', '1');
-
-      // Hover over polygon 0 (red triangle at ~245, 235)
-      await page.mouse.move(offset.x + 245, offset.y + 235);
-
-      // Verify stroke is blue (#3b82f6) and strokeWidth is 2
-      await expect(polygon0).toHaveAttribute('stroke', '#3b82f6');
-      await expect(polygon0).toHaveAttribute('stroke-width', '2');
-
-      // Move mouse away to empty space
-      await page.mouse.move(offset.x + 50, offset.y + 50);
-
-      // Verify stroke returns to black and strokeWidth returns to 1
-      await expect(polygon0).toHaveAttribute('stroke', 'black');
-      await expect(polygon0).toHaveAttribute('stroke-width', '1');
-    });
+    // Note: TC-18 (Polygon border changes on hover) removed - SVG polygon attributes
+    // don't exist in GPU rendering mode. Hover effects are visual only.
   });
 
   test.describe('Translation Tests', () => {
@@ -328,91 +307,38 @@ test.describe('ResizableCanvas E2E Tests', () => {
     });
   });
 
+  // Note: Hover Tests (TC-17 through TC-21) removed
+  // With GPU rendering, shapes are rendered on canvas, not as SVG polygons.
+  // Hover effects are visual only (cursor changes to pointer via is_shape_hovered prop).
+  // Testing hover requires visual regression testing or checking cursor style.
   test.describe('Hover Tests', () => {
-    test('TC-17: Hovering over polygon shows blue border with width 2', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const polygon1 = svg.locator('polygon').nth(0);
+    test('TC-22: Hovering over shape changes cursor to pointer', async ({ page }) => {
+      // Hover over shape 0 using canvas coordinates
+      await hoverOnShape(page, 0);
 
-      // Verify initial state (black border, width 1)
-      expect(await polygon1.getAttribute('stroke')).toBe('black');
-      expect(await polygon1.getAttribute('stroke-width')).toBe('1');
-
-      // Hover over polygon
-      await polygon1.hover();
-
-      // Verify hover state (blue border, width 2)
-      expect(await polygon1.getAttribute('stroke')).toBe('#3b82f6');
-      expect(await polygon1.getAttribute('stroke-width')).toBe('2');
+      // Check canvas cursor style
+      const canvas = page.locator('canvas');
+      const cursor = await canvas.evaluate((el) => window.getComputedStyle(el).cursor);
+      expect(cursor).toBe('pointer');
     });
 
-    test('TC-18: Hovering away from polygon clears hover effect', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const polygon1 = svg.locator('polygon').nth(0);
-
-      // Hover over polygon
-      await polygon1.hover();
-      expect(await polygon1.getAttribute('stroke')).toBe('#3b82f6');
-
-      // Hover away to empty space
+    test('TC-23: Hovering over empty space has default cursor', async ({ page }) => {
+      // Hover over empty space
       const offset = await getSVGOffset(page);
       await page.mouse.move(offset.x + 50, offset.y + 50);
 
-      // Verify hover cleared
-      expect(await polygon1.getAttribute('stroke')).toBe('black');
-      expect(await polygon1.getAttribute('stroke-width')).toBe('1');
+      // Check canvas cursor style
+      const canvas = page.locator('canvas');
+      const cursor = await canvas.evaluate((el) => window.getComputedStyle(el).cursor);
+      expect(cursor).toBe('default');
     });
 
-    test('TC-19: Clicking on polygon clears hover effect', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const polygon1 = svg.locator('polygon').nth(0);
+    test('TC-24: Clicking on shape selects it', async ({ page }) => {
+      // Click on shape 0
+      await clickOnShape(page, 0);
 
-      // Hover over polygon
-      await polygon1.hover();
-      expect(await polygon1.getAttribute('stroke')).toBe('#3b82f6');
-
-      // Click on polygon
-      await polygon1.click();
-
-      // Verify hover cleared (even though polygon is selected)
-      expect(await polygon1.getAttribute('stroke')).toBe('black');
-      expect(await polygon1.getAttribute('stroke-width')).toBe('1');
-    });
-
-    test('TC-20: Starting selection rectangle clears hover effect', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const polygon1 = svg.locator('polygon').nth(0);
-
-      // Hover over polygon
-      await polygon1.hover();
-      expect(await polygon1.getAttribute('stroke')).toBe('#3b82f6');
-
-      // Start drawing selection rectangle
-      const offset = await getSVGOffset(page);
-      await page.mouse.move(offset.x + 50, offset.y + 50);
-      await page.mouse.down();
-
-      // Verify hover cleared
-      expect(await polygon1.getAttribute('stroke')).toBe('black');
-      expect(await polygon1.getAttribute('stroke-width')).toBe('1');
-
-      // Clean up
-      await page.mouse.up();
-    });
-
-    test('TC-21: Hover works on multiple polygons independently', async ({ page }) => {
-      const svg = page.locator('[data-testid="main-canvas"]');
-      const polygon1 = svg.locator('polygon').nth(0);
-      const polygon2 = svg.locator('polygon').nth(1);
-
-      // Hover over first polygon
-      await polygon1.hover();
-      expect(await polygon1.getAttribute('stroke')).toBe('#3b82f6');
-      expect(await polygon2.getAttribute('stroke')).toBe('black');
-
-      // Hover over second polygon
-      await polygon2.hover();
-      expect(await polygon1.getAttribute('stroke')).toBe('black');
-      expect(await polygon2.getAttribute('stroke')).toBe('#3b82f6');
+      // Verify selection
+      await assertSelectionState(page, [0]);
     });
   });
 
@@ -436,7 +362,7 @@ test.describe('ResizableCanvas E2E Tests', () => {
     });
 
     test('TC-16: Reset button restores initial state', async ({ page }) => {
-      const svg = page.locator('svg');
+      const svg = page.locator('[data-testid="main-canvas"]');
 
       // Make changes
       await drawSelectionRectangle(page, 220, 210, 310, 310);
@@ -448,13 +374,132 @@ test.describe('ResizableCanvas E2E Tests', () => {
       // Click reset
       await page.click('button:has-text("Reset")');
 
-      // Verify back to initial state
+      // Verify back to initial state - selection should be cleared
       await assertNoSelection(page);
 
-      // Verify polygons are at initial positions
-      const polygon1 = svg.locator('polygon').nth(0);
-      const points = await polygon1.getAttribute('points');
-      expect(points).toBe('230,220 260,220 245,250');
+      // Note: Can't verify polygon points with GPU rendering (shapes are on canvas, not SVG).
+      // The reset functionality is verified by selection being cleared and shapes visually
+      // returning to original positions (would require visual regression testing).
+    });
+  });
+
+  test.describe('GPU Transform Regression Tests', () => {
+    test('TC-25: Resize changes persist after release', async ({ page }) => {
+      const svg = page.locator('[data-testid="main-canvas"]');
+
+      // Select shapes
+      await drawSelectionRectangle(page, 220, 210, 310, 310);
+      const selectionBox = svg.locator('[data-testid="selection-bounding-box"]');
+
+      // Get initial bounding box
+      const boxBefore = await selectionBox.boundingBox();
+      if (!boxBefore) throw new Error('Selection box not found');
+      const initialWidth = boxBefore.width;
+
+      // Drag right handle to resize
+      await dragHandle(page, 'right', 60, 0);
+
+      // Get bounding box after resize
+      const boxAfter = await selectionBox.boundingBox();
+      if (!boxAfter) throw new Error('Selection box not found after resize');
+
+      // Width should have increased by approximately 60px
+      const widthDiff = boxAfter.width - initialWidth;
+      expect(widthDiff, 'Resize should persist after release').toBeGreaterThan(50);
+      expect(widthDiff, 'Resize should persist after release').toBeLessThan(70);
+
+      // Deselect and reselect to verify changes are committed to shapes
+      await page.mouse.click(100, 100);
+      await page.waitForTimeout(200);
+
+      // Reselect with larger area to capture resized shapes
+      await drawSelectionRectangle(page, 220, 210, 380, 310);
+
+      const boxReselected = await selectionBox.boundingBox();
+      if (!boxReselected) throw new Error('Selection box not found after reselect');
+
+      // Reselected width should be close to the resized width
+      expect(Math.abs(boxReselected.width - boxAfter.width),
+        'Resize should persist after deselect/reselect').toBeLessThan(10);
+    });
+
+    test('TC-26: Translation changes persist after release', async ({ page }) => {
+      const svg = page.locator('[data-testid="main-canvas"]');
+
+      // Select shapes
+      await drawSelectionRectangle(page, 220, 210, 310, 310);
+      const selectionBox = svg.locator('[data-testid="selection-bounding-box"]');
+
+      // Get initial bounding box position
+      const boxBefore = await selectionBox.boundingBox();
+      if (!boxBefore) throw new Error('Selection box not found');
+      const initialX = boxBefore.x;
+      const initialY = boxBefore.y;
+
+      // Get center and translate
+      const centerX = boxBefore.x + boxBefore.width / 2;
+      const centerY = boxBefore.y + boxBefore.height / 2;
+      await dragFromTo(page, centerX, centerY, centerX + 50, centerY + 40);
+
+      // Get bounding box after translation
+      const boxAfter = await selectionBox.boundingBox();
+      if (!boxAfter) throw new Error('Selection box not found after translation');
+
+      // Position should have changed by approximately the drag distance
+      const xDiff = boxAfter.x - initialX;
+      const yDiff = boxAfter.y - initialY;
+      expect(xDiff, 'X translation should persist').toBeGreaterThan(40);
+      expect(xDiff, 'X translation should persist').toBeLessThan(60);
+      expect(yDiff, 'Y translation should persist').toBeGreaterThan(30);
+      expect(yDiff, 'Y translation should persist').toBeLessThan(50);
+
+      // Deselect and reselect to verify changes are committed
+      await page.mouse.click(100, 100);
+      await page.waitForTimeout(200);
+
+      // Reselect - need to account for the translation
+      await drawSelectionRectangle(page, 270, 250, 360, 350);
+
+      const boxReselected = await selectionBox.boundingBox();
+      if (!boxReselected) throw new Error('Selection box not found after reselect');
+
+      // Reselected position should be close to the translated position
+      expect(Math.abs(boxReselected.x - boxAfter.x),
+        'X translation should persist after deselect/reselect').toBeLessThan(15);
+      expect(Math.abs(boxReselected.y - boxAfter.y),
+        'Y translation should persist after deselect/reselect').toBeLessThan(15);
+    });
+
+    test('TC-27: Corner resize maintains anchor at opposite corner', async ({ page }) => {
+      const svg = page.locator('[data-testid="main-canvas"]');
+
+      // Select shapes
+      await drawSelectionRectangle(page, 220, 210, 310, 310);
+      const selectionBox = svg.locator('[data-testid="selection-bounding-box"]');
+
+      // Get initial bounding box
+      const boxBefore = await selectionBox.boundingBox();
+      if (!boxBefore) throw new Error('Selection box not found');
+
+      // Record the bottom-right corner (anchor for top-left resize)
+      const anchorX = boxBefore.x + boxBefore.width;
+      const anchorY = boxBefore.y + boxBefore.height;
+
+      // Drag top-left handle to resize (towards top-left, making selection bigger)
+      await dragHandle(page, 'top-left', -30, -30);
+
+      // Get bounding box after resize
+      const boxAfter = await selectionBox.boundingBox();
+      if (!boxAfter) throw new Error('Selection box not found after resize');
+
+      // Bottom-right corner should remain approximately the same
+      const newAnchorX = boxAfter.x + boxAfter.width;
+      const newAnchorY = boxAfter.y + boxAfter.height;
+
+      expect(Math.abs(newAnchorX - anchorX),
+        'Bottom-right X should stay anchored').toBeLessThan(10);
+      expect(Math.abs(newAnchorY - anchorY),
+        'Bottom-right Y should stay anchored').toBeLessThan(10);
     });
   });
 });

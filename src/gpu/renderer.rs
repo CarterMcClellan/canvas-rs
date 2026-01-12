@@ -1,4 +1,6 @@
 use super::vertex::{Mesh, Uniforms, Vertex};
+use crate::scene::Shape;
+use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 use web_sys::HtmlCanvasElement;
 
@@ -6,6 +8,22 @@ use web_sys::HtmlCanvasElement;
 const MAX_VERTICES: usize = 65536;
 /// Maximum number of indices we can render in a single draw call
 const MAX_INDICES: usize = MAX_VERTICES * 3;
+
+/// Multiply two 4x4 matrices (column-major order)
+/// Result = a * b
+fn multiply_mat4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut result = [[0.0f32; 4]; 4];
+    for col in 0..4 {
+        for row in 0..4 {
+            result[col][row] =
+                a[0][row] * b[col][0] +
+                a[1][row] * b[col][1] +
+                a[2][row] * b[col][2] +
+                a[3][row] * b[col][3];
+        }
+    }
+    result
+}
 
 /// GPU renderer using wgpu
 /// Handles WebGL/WebGPU initialization and shape rendering
@@ -317,6 +335,139 @@ impl Renderer {
     /// Get current canvas height
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// Render shapes with per-shape transform overrides
+    /// This is the fast path for dragging/transforming selected shapes
+    ///
+    /// - `shape_meshes`: Pre-tessellated meshes for each shape (keyed by shape ID)
+    /// - `shapes`: The shapes to render (for getting base transforms)
+    /// - `transform_overrides`: Map of shape ID to transform matrix override
+    /// - `clear_color`: Background color
+    pub fn render_shapes_with_transforms(
+        &mut self,
+        shape_meshes: &HashMap<u64, Mesh>,
+        shapes: &[Shape],
+        transform_overrides: &HashMap<u64, [[f32; 4]; 4]>,
+        clear_color: [f32; 4],
+    ) -> Result<(), String> {
+        // Get surface texture to render to
+        let output = self
+            .surface
+            .get_current_texture()
+            .map_err(|e| format!("Failed to get surface texture: {e}"))?;
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        // First pass: clear the screen
+        {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Clear Encoder"),
+                });
+
+            {
+                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Clear Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_color[0] as f64,
+                                g: clear_color[1] as f64,
+                                b: clear_color[2] as f64,
+                                a: clear_color[3] as f64,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        // Render each shape with its own transform
+        // Each shape needs its own submit because uniform buffers are shared
+        for shape in shapes {
+            let mesh = match shape_meshes.get(&shape.id) {
+                Some(m) => m,
+                None => continue, // Skip shapes without meshes
+            };
+
+            if mesh.is_empty() {
+                continue;
+            }
+
+            if mesh.vertices.len() > MAX_VERTICES || mesh.indices.len() > MAX_INDICES {
+                continue; // Skip shapes that are too large
+            }
+
+            // Get transform - compose override with shape's base transform if available
+            // The shape's base transform positions the shape in world space
+            // The override applies additional translation/scale during drag operations
+            let base_transform = shape.transform.to_matrix4();
+            let model_transform = if let Some(override_transform) = transform_overrides.get(&shape.id) {
+                // Compose: override * base (apply base first to get world position, then override)
+                multiply_mat4(override_transform, &base_transform)
+            } else {
+                base_transform
+            };
+
+            // Update buffers
+            let uniforms = Uniforms::orthographic(self.width as f32, self.height as f32)
+                .with_model_transform(model_transform);
+            self.queue
+                .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+            self.queue
+                .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&mesh.vertices));
+            self.queue
+                .write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(&mesh.indices));
+
+            // Create encoder and render pass for this shape
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Shape Encoder"),
+                });
+
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Shape Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // Don't clear, preserve previous draws
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                render_pass.set_pipeline(&self.render_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
+            }
+
+            // Submit this shape's commands
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        output.present();
+
+        Ok(())
     }
 }
 
