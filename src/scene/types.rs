@@ -152,6 +152,11 @@ impl Transform2D {
 
         translation * rotation * scale * anchor_offset
     }
+
+    /// Get the transformation matrix as a raw array for GPU uniform buffers
+    pub fn to_matrix4(&self) -> [[f32; 4]; 4] {
+        self.to_matrix().to_cols_array_2d()
+    }
 }
 
 impl Default for Transform2D {

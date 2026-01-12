@@ -3,6 +3,7 @@ use web_sys::{MouseEvent, SvgsvgElement};
 use wasm_bindgen::JsCast;
 use gloo::events::EventListener;
 use std::rc::Rc;
+use std::collections::HashMap;
 
 use crate::types::*;
 use crate::utils::*;
@@ -14,7 +15,62 @@ use crate::components::GpuCanvas;
 use crate::scene::{self, Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox, Color, Transform2D};
 use crate::demo_paths::create_demo_shapes;
 
+/// Compute GPU transform overrides for selected shapes during drag/scale operations
+/// Returns a map of shape ID -> transform matrix that overrides the shape's base transform
+fn compute_transform_overrides(
+    shapes: &[Shape],
+    selected_ids: &[usize],
+    fixed_anchor: &Point,
+    translation: &Point,
+    scale_x: f64,
+    scale_y: f64,
+) -> HashMap<u64, [[f32; 4]; 4]> {
+    use glam::{Mat4, Vec3};
+
+    let mut overrides = HashMap::new();
+
+    // Only compute overrides if we have a meaningful transform to apply
+    let has_transform = translation.x != 0.0 || translation.y != 0.0 || scale_x != 1.0 || scale_y != 1.0;
+
+    if !has_transform {
+        return overrides;
+    }
+
+    // The fixed_anchor is the point around which we scale
+    // For shapes with absolute geometry coordinates (not at origin), we need to:
+    // 1. Translate so fixed_anchor is at origin
+    // 2. Scale
+    // 3. Translate back to new position (with translation applied)
+
+    let anchor_x = fixed_anchor.x as f32;
+    let anchor_y = fixed_anchor.y as f32;
+    let sx = scale_x as f32;
+    let sy = scale_y as f32;
+    let tx = translation.x as f32;
+    let ty = translation.y as f32;
+
+    // Build the transform matrix:
+    // M = T(anchor + translation) * S(scale) * T(-anchor)
+    // Which expands to a matrix that scales around the anchor point
+    let to_origin = Mat4::from_translation(Vec3::new(-anchor_x, -anchor_y, 0.0));
+    let scale = Mat4::from_scale(Vec3::new(sx, sy, 1.0));
+    let from_origin = Mat4::from_translation(Vec3::new(anchor_x + tx, anchor_y + ty, 0.0));
+
+    let transform_matrix = from_origin * scale * to_origin;
+
+    // Apply the same transform to all selected shapes
+    for &idx in selected_ids {
+        if let Some(shape) = shapes.get(idx) {
+            overrides.insert(shape.id, transform_matrix.to_cols_array_2d());
+        }
+    }
+
+    overrides
+}
+
 /// Apply visual transform to shapes for GPU rendering (selected shapes get preview transform)
+/// DEPRECATED: Use compute_transform_overrides with GpuCanvas transform_overrides prop instead
+#[allow(dead_code)]
 fn apply_selection_transform(
     shapes: &[Shape],
     selected_ids: &[usize],
@@ -166,6 +222,7 @@ pub fn resizable_canvas() -> Html {
     let dimensions = use_state(|| Dimensions::new(100.0, 100.0));
     let base_dimensions = use_state(|| Dimensions::new(100.0, 100.0));
     let translation = use_mut_ref(|| Point::zero());
+    let translation_state = use_state(|| Point::zero());  // For triggering re-renders
     let is_dragging = use_state(|| false);
     let is_moving = use_state(|| false);
     let active_handle = use_state(|| None::<HandleName>);
@@ -216,28 +273,36 @@ pub fn resizable_canvas() -> Html {
 
     // Calculated values
     let has_selection = !selected_ids.is_empty();
+    let has_base_ref = resize_base_signed.borrow().is_some();
+    let has_curr_ref = resize_current_dims.borrow().is_some();
     let base_signed_dims = resize_base_signed
         .borrow()
         .as_ref()
         .cloned()
         .unwrap_or_else(|| Dimensions::new(base_dimensions.width, base_dimensions.height));
+    // Use resize_current_dims (signed) during drag, otherwise use dimensions state
+    let current_dims = resize_current_dims
+        .borrow()
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| Dimensions::new(dimensions.width, dimensions.height));
     let scale_x = if has_selection {
-        dimensions.width / base_signed_dims.width
+        current_dims.width / base_signed_dims.width
     } else {
         1.0
     };
     let scale_y = if has_selection {
-        dimensions.height / base_signed_dims.height
+        current_dims.height / base_signed_dims.height
     } else {
         1.0
     };
 
     let trans = *translation.borrow();
     let bounding_box = BoundingBox::new(
-        fixed_anchor.x + trans.x + if dimensions.width < 0.0 { dimensions.width } else { 0.0 },
-        fixed_anchor.y + trans.y + if dimensions.height < 0.0 { dimensions.height } else { 0.0 },
-        dimensions.width.abs(),
-        dimensions.height.abs(),
+        fixed_anchor.x + trans.x + if current_dims.width < 0.0 { current_dims.width } else { 0.0 },
+        fixed_anchor.y + trans.y + if current_dims.height < 0.0 { current_dims.height } else { 0.0 },
+        current_dims.width.abs(),
+        current_dims.height.abs(),
     );
 
     // Reset handler
@@ -248,6 +313,7 @@ pub fn resizable_canvas() -> Html {
         let dimensions = dimensions.clone();
         let base_dimensions = base_dimensions.clone();
         let translation = translation.clone();
+        let translation_state = translation_state.clone();
         let selection_rect = selection_rect.clone();
         let selection_origin = selection_origin.clone();
         let guidelines = guidelines.clone();
@@ -262,6 +328,7 @@ pub fn resizable_canvas() -> Html {
             dimensions.set(Dimensions::new(100.0, 100.0));
             base_dimensions.set(Dimensions::new(100.0, 100.0));
             *translation.borrow_mut() = Point::zero();
+            translation_state.set(Point::zero());
             selection_rect.set(None);
             selection_origin.set(None);
             guidelines.set(Vec::new());
@@ -280,6 +347,7 @@ pub fn resizable_canvas() -> Html {
         let base_dimensions = base_dimensions.clone();
         let selection_origin = selection_origin.clone();
         let translation = translation.clone();
+        let translation_state = translation_state.clone();
         let guidelines = guidelines.clone();
         let resize_base_signed = resize_base_signed.clone();
         let resize_start_anchor = resize_start_anchor.clone();
@@ -304,6 +372,7 @@ pub fn resizable_canvas() -> Html {
             base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
             selection_origin.set(Some(Point::new(bbox.x, bbox.y)));
             *translation.borrow_mut() = Point::zero();
+            translation_state.set(Point::zero());
             guidelines.set(Vec::new());
             resize_base_signed.replace(None);
             resize_start_anchor.replace(None);
@@ -329,6 +398,7 @@ pub fn resizable_canvas() -> Html {
         let base_dimensions = base_dimensions.clone();
         let selection_origin = selection_origin.clone();
         let translation = translation.clone();
+        let translation_state = translation_state.clone();
         let guidelines = guidelines.clone();
         let resize_base_signed = resize_base_signed.clone();
         let resize_start_anchor = resize_start_anchor.clone();
@@ -415,6 +485,7 @@ pub fn resizable_canvas() -> Html {
             base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
             selection_origin.set(Some(next_anchor));
             *translation.borrow_mut() = Point::zero();
+            translation_state.set(Point::zero());
             guidelines.set(Vec::new());
             resize_base_signed.replace(None);
             resize_start_anchor.replace(None);
@@ -640,6 +711,7 @@ pub fn resizable_canvas() -> Html {
             // Commit any existing translation
             let trans = *translation.borrow();
             if trans.x != 0.0 || trans.y != 0.0 {
+                web_sys::console::log_1(&"HANDLE MOUSEDOWN: committing existing translation".into());
                 commit_fn.emit(());
             }
 
@@ -744,23 +816,26 @@ pub fn resizable_canvas() -> Html {
                                 .cloned()
                                 .unwrap_or_else(|| Dimensions::new(base_dimensions.width, base_dimensions.height));
 
+                            // For left/top handles, anchor is on the OPPOSITE side, so we use
+                            // point - anchor to get negative values (matching negative signed_base).
+                            // This ensures scale = current/base is positive during normal resize.
                             let new_width_signed = match handle_val {
                                 HandleName::Left | HandleName::TopLeft | HandleName::BottomLeft => {
-                                    anchor_point.x - point.x
+                                    point.x - anchor_point.x  // Negative when mouse left of anchor
                                 }
                                 HandleName::Right | HandleName::TopRight | HandleName::BottomRight => {
-                                    point.x - anchor_point.x
+                                    point.x - anchor_point.x  // Positive when mouse right of anchor
                                 }
                                 _ => signed_base.width,
                             };
 
                             let new_height_signed = match handle_val {
                                 HandleName::Top | HandleName::TopLeft | HandleName::TopRight => {
-                                    anchor_point.y - point.y
+                                    point.y - anchor_point.y  // Negative when mouse above anchor
                                 }
                                 HandleName::Bottom
                                 | HandleName::BottomLeft
-                                | HandleName::BottomRight => point.y - anchor_point.y,
+                                | HandleName::BottomRight => point.y - anchor_point.y,  // Positive when mouse below anchor
                                 _ => signed_base.height,
                             };
 
@@ -793,11 +868,16 @@ pub fn resizable_canvas() -> Html {
                 let is_dragging = is_dragging.clone();
                 let active_handle = active_handle.clone();
                 let commit_transform = commit_transform.clone();
+                let resize_current_dims = resize_current_dims.clone();
 
                 EventListener::new(&window, "mouseup", move |_event| {
-                    is_dragging.set(false);
-                    active_handle.set(None);
-                    commit_transform.emit(());
+                    // Only commit if we have active resize state
+                    // This prevents double-commits from spurious mouseup events
+                    if resize_current_dims.borrow().is_some() {
+                        is_dragging.set(false);
+                        active_handle.set(None);
+                        commit_transform.emit(());
+                    }
                 })
             };
 
@@ -817,6 +897,7 @@ pub fn resizable_canvas() -> Html {
         let fixed_anchor = fixed_anchor.clone();
         let dimensions = dimensions.clone();
         let translation = translation.clone();
+        let translation_state = translation_state.clone();
         let shapes_for_snap = shapes.clone();
         let selected_ids = selected_ids.clone();
         let guidelines = guidelines.clone();
@@ -834,6 +915,7 @@ pub fn resizable_canvas() -> Html {
                 let svg_ref = svg_ref.clone();
                 let move_start = move_start.clone();
                 let translation = translation.clone();
+                let translation_state = translation_state.clone();
                 let fixed_anchor = fixed_anchor.clone();
                 let dimensions = dimensions.clone();
                 let _shapes_for_snap = shapes_for_snap.clone();
@@ -854,7 +936,9 @@ pub fn resizable_canvas() -> Html {
                             let _dims = *dimensions;
                             let _anchor = *fixed_anchor;
 
-                            *translation.borrow_mut() = Point::new(delta_x, delta_y);
+                            let new_trans = Point::new(delta_x, delta_y);
+                            *translation.borrow_mut() = new_trans;
+                            translation_state.set(new_trans);  // Trigger re-render for GPU transform
                         }
                     }
                 })
@@ -868,10 +952,12 @@ pub fn resizable_canvas() -> Html {
                 let commit_transform = commit_transform.clone();
 
                 EventListener::new(&window, "mouseup", move |_event| {
-                    is_moving.set(false);
-                    move_start.replace(None);
-                    guidelines.set(Vec::new());
-                    commit_transform.emit(());
+                    if *is_moving {
+                        is_moving.set(false);
+                        move_start.replace(None);
+                        guidelines.set(Vec::new());
+                        commit_transform.emit(());
+                    }
                 })
             };
 
@@ -1003,11 +1089,11 @@ pub fn resizable_canvas() -> Html {
         None
     };
 
-    // GPU rendering - apply selection transform to shapes for preview
-    let render_shapes = apply_selection_transform(
+    // GPU rendering - compute transform overrides for selected shapes only
+    // This is much faster than cloning all shapes on every frame
+    let transform_overrides = compute_transform_overrides(
         &shapes,
         &selected_ids,
-        *hovered_id,
         &fixed_anchor,
         &trans,
         scale_x,
@@ -1061,9 +1147,12 @@ pub fn resizable_canvas() -> Html {
                     <GpuCanvas
                         width={CANVAS_WIDTH as u32}
                         height={CANVAS_HEIGHT as u32}
-                        shapes={render_shapes}
+                        shapes={(*shapes).clone()}
                         render_version={*render_version}
                         selection_bbox={selection_bbox_gpu}
+                        selected_ids={(*selected_ids).clone()}
+                        flip_x={current_dims.width.signum() != base_signed_dims.width.signum()}
+                        flip_y={current_dims.height.signum() != base_signed_dims.height.signum()}
                         guidelines={(*guidelines).clone()}
                         marquee_rect={marquee_rect_gpu}
                         preview_bbox={preview_bbox_gpu}
@@ -1074,6 +1163,7 @@ pub fn resizable_canvas() -> Html {
                         on_bbox_mousedown={on_bbox_mousedown.clone()}
                         is_shape_hovered={hovered_id.is_some()}
                         background_color={[0.0, 0.0, 0.0, 0.0]}
+                        transform_overrides={transform_overrides}
                     />
                     // Invisible SVG for coordinate conversion (needed for mouse events)
                     <svg

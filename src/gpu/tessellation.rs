@@ -6,6 +6,7 @@ use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions, StrokeTessellator,
     StrokeVertex, VertexBuffers,
 };
+use std::collections::HashMap;
 
 /// Convert an SVG elliptical arc to cubic bezier curves
 /// Based on the SVG arc implementation algorithm
@@ -151,9 +152,12 @@ fn arc_to_beziers(
 }
 
 /// Tessellator for converting shapes to GPU-renderable triangles
+/// Includes a cache to avoid re-tessellating unchanged shapes
 pub struct Tessellator {
     fill_tessellator: FillTessellator,
     stroke_tessellator: StrokeTessellator,
+    /// Cache of tessellated meshes by shape ID
+    mesh_cache: HashMap<u64, Mesh>,
 }
 
 impl Default for Tessellator {
@@ -167,10 +171,66 @@ impl Tessellator {
         Self {
             fill_tessellator: FillTessellator::new(),
             stroke_tessellator: StrokeTessellator::new(),
+            mesh_cache: HashMap::new(),
         }
     }
 
-    /// Tessellate a shape into a mesh
+    /// Clear the mesh cache
+    pub fn clear_cache(&mut self) {
+        self.mesh_cache.clear();
+    }
+
+    /// Remove a specific shape from the cache
+    pub fn invalidate_shape(&mut self, shape_id: u64) {
+        self.mesh_cache.remove(&shape_id);
+    }
+
+    /// Get or create a cached mesh for a shape
+    /// Uses the shape's dirty flag to determine if re-tessellation is needed
+    /// IMPORTANT: This tessellates with identity transform - the actual transform
+    /// is applied in the shader via uniform
+    pub fn get_or_tessellate_shape(&mut self, shape: &Shape) -> &Mesh {
+        let shape_id = shape.id;
+
+        // Check if we need to re-tessellate
+        if shape.dirty || !self.mesh_cache.contains_key(&shape_id) {
+            let mesh = self.tessellate_shape_at_origin(shape);
+            self.mesh_cache.insert(shape_id, mesh);
+        }
+
+        self.mesh_cache.get(&shape_id).unwrap()
+    }
+
+    /// Tessellate a shape at origin (without applying shape's transform)
+    /// The transform will be applied in the shader
+    fn tessellate_shape_at_origin(&mut self, shape: &Shape) -> Mesh {
+        let mut mesh = Mesh::new();
+        let identity = Transform2D::identity();
+
+        // Tessellate fill if present
+        if let Some(fill_color) = shape.style.fill {
+            if let Some(fill_mesh) = self.tessellate_geometry_fill(&shape.geometry, &identity, fill_color) {
+                mesh.extend(&fill_mesh);
+            }
+        }
+
+        // Tessellate stroke if present
+        if let Some(stroke) = shape.style.stroke {
+            if let Some(stroke_mesh) = self.tessellate_geometry_stroke(
+                &shape.geometry,
+                &identity,
+                stroke.color,
+                stroke.width,
+            ) {
+                mesh.extend(&stroke_mesh);
+            }
+        }
+
+        mesh
+    }
+
+    /// Tessellate a shape into a mesh (includes shape's transform baked in)
+    /// Use get_or_tessellate_shape for cached version without transform
     pub fn tessellate_shape(&mut self, shape: &Shape) -> Mesh {
         let mut mesh = Mesh::new();
 
@@ -196,7 +256,8 @@ impl Tessellator {
         mesh
     }
 
-    /// Tessellate multiple shapes into a single mesh
+    /// Tessellate multiple shapes into a single mesh (legacy method)
+    /// For better performance, use get_or_tessellate_shape with per-shape rendering
     pub fn tessellate_shapes(&mut self, shapes: &[Shape]) -> Mesh {
         let mut mesh = Mesh::new();
         for shape in shapes {
