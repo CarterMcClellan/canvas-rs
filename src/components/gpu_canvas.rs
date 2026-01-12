@@ -3,6 +3,7 @@ use crate::gpu::{Renderer, Tessellator};
 use crate::scene::{BBox, Shape, Vec2};
 use crate::types::{Guideline, HandleName};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 use yew::prelude::*;
@@ -29,6 +30,18 @@ pub struct GpuCanvasProps {
     /// Selection bounding box
     #[prop_or_default]
     pub selection_bbox: Option<BBox>,
+
+    /// Selected shape indices
+    #[prop_or_default]
+    pub selected_ids: Vec<usize>,
+
+    /// Flip state for X axis
+    #[prop_or(false)]
+    pub flip_x: bool,
+
+    /// Flip state for Y axis
+    #[prop_or(false)]
+    pub flip_y: bool,
 
     /// Snap guidelines
     #[prop_or_default]
@@ -70,12 +83,21 @@ pub struct GpuCanvasProps {
     /// Default is white with full opacity to match SVG canvas
     #[prop_or([1.0, 1.0, 1.0, 1.0])]
     pub background_color: [f32; 4],
+
+    /// Transform overrides for specific shapes (by shape ID)
+    /// Used for efficient dragging/scaling without re-tessellation
+    #[prop_or_default]
+    pub transform_overrides: HashMap<u64, [[f32; 4]; 4]>,
 }
 
 /// State for the renderer
 struct RendererState {
     renderer: Renderer,
     tessellator: Tessellator,
+    /// Cached meshes by shape ID
+    mesh_cache: HashMap<u64, crate::gpu::Mesh>,
+    /// Track which shape IDs we've seen for cache invalidation
+    known_shape_ids: Vec<u64>,
 }
 
 /// GPU-accelerated canvas component with SVG overlay
@@ -107,6 +129,8 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
                             let state = RendererState {
                                 renderer,
                                 tessellator: Tessellator::new(),
+                                mesh_cache: HashMap::new(),
+                                known_shape_ids: Vec::new(),
                             };
                             renderer_state.set(Some(Rc::new(RefCell::new(state))));
                         }
@@ -122,23 +146,60 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
     }
 
     // Render when shapes change or renderer becomes available
-    // Include shapes in dependency to re-render when shape coordinates change (e.g., during resize)
+    // Uses cached tessellation and per-shape transforms for efficient dragging
     {
         let renderer_state_clone = (*renderer_state).clone();
         let shapes = props.shapes.clone();
         let background_color = props.background_color;
+        let transform_overrides = props.transform_overrides.clone();
+
+        // Create a lightweight dependency: shape IDs, dirty flags, and transform overrides
+        // This avoids cloning entire shape geometries
+        let shape_deps: Vec<(u64, bool)> = shapes.iter().map(|s| (s.id, s.dirty)).collect();
+
+        // For transform_overrides, we use the keys and a hash of values as dependency
+        // This ensures the effect re-runs when transforms change
+        let override_keys: Vec<u64> = transform_overrides.keys().copied().collect();
+        let override_hash: u64 = transform_overrides.values()
+            .flat_map(|m| m.iter().flat_map(|row| row.iter()))
+            .map(|&f| f.to_bits() as u64)
+            .fold(0u64, |acc, x| acc.wrapping_add(x));
 
         use_effect_with(
-            (renderer_state_clone.is_some(), shapes.clone()),
+            (renderer_state_clone.is_some(), shape_deps, override_keys, override_hash),
             move |_| {
                 if let Some(ref state) = renderer_state_clone {
                     let mut state = state.borrow_mut();
 
-                    // Tessellate shapes
-                    let mesh = state.tessellator.tessellate_shapes(&shapes);
+                    // Update mesh cache - only tessellate new or dirty shapes
+                    let current_ids: Vec<u64> = shapes.iter().map(|s| s.id).collect();
 
-                    // Render
-                    if let Err(e) = state.renderer.render(&mesh, background_color) {
+                    // Remove meshes for shapes that no longer exist
+                    state.mesh_cache.retain(|id, _| current_ids.contains(id));
+
+                    // Tessellate new or dirty shapes (at origin - transform applied in shader)
+                    for shape in &shapes {
+                        let needs_tessellation = shape.dirty || !state.mesh_cache.contains_key(&shape.id);
+                        if needs_tessellation {
+                            let mesh = state.tessellator.get_or_tessellate_shape(shape).clone();
+                            state.mesh_cache.insert(shape.id, mesh);
+                        }
+                    }
+
+                    state.known_shape_ids = current_ids;
+
+                    // Clone mesh cache to avoid borrow issues
+                    // (This is a shallow clone of the HashMap, meshes are cloned but it's still
+                    // much cheaper than re-tessellating everything on every frame)
+                    let mesh_cache_snapshot = state.mesh_cache.clone();
+
+                    // Render with per-shape transforms
+                    if let Err(e) = state.renderer.render_shapes_with_transforms(
+                        &mesh_cache_snapshot,
+                        &shapes,
+                        &transform_overrides,
+                        background_color,
+                    ) {
                         web_sys::console::error_1(&format!("Render error: {}", e).into());
                     }
                 }
@@ -191,6 +252,9 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
             // SVG overlay for UI controls
             <CanvasOverlay
                 selection_bbox={props.selection_bbox.clone()}
+                selected_ids={props.selected_ids.clone()}
+                flip_x={props.flip_x}
+                flip_y={props.flip_y}
                 guidelines={props.guidelines.clone()}
                 marquee_rect={props.marquee_rect.clone()}
                 preview_bbox={props.preview_bbox.clone()}

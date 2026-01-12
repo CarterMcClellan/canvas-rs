@@ -9,6 +9,18 @@ pub struct OverlayProps {
     #[prop_or_default]
     pub selection_bbox: Option<BBox>,
 
+    /// Selected shape indices (for test data attribute)
+    #[prop_or_default]
+    pub selected_ids: Vec<usize>,
+
+    /// Flip state for X axis (for test data attribute)
+    #[prop_or(false)]
+    pub flip_x: bool,
+
+    /// Flip state for Y axis (for test data attribute)
+    #[prop_or(false)]
+    pub flip_y: bool,
+
     /// Snap guidelines to display
     #[prop_or_default]
     pub guidelines: Vec<Guideline>,
@@ -80,6 +92,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
                 html! {
                     <rect
                         key={handle.to_kebab_case()}
+                        data-testid={format!("resize-handle-{}", handle.to_kebab_case())}
                         x={format!("{}", pos.x - half)}
                         y={format!("{}", pos.y - half)}
                         width={format!("{}", size)}
@@ -106,6 +119,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
             <>
                 // Clickable bounding box area (for moving selection)
                 <rect
+                    data-testid="selection-bounding-box"
                     x={format!("{}", bbox.min.x)}
                     y={format!("{}", bbox.min.y)}
                     width={format!("{}", bbox.width())}
@@ -166,6 +180,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
 
         html! {
             <rect
+                data-testid="marquee-selection-rect"
                 x={format!("{}", x)}
                 y={format!("{}", y)}
                 width={format!("{}", width)}
@@ -183,6 +198,7 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
     let preview_element = if let Some(bbox) = &props.preview_bbox {
         html! {
             <rect
+                data-testid="preview-bounding-box"
                 x={format!("{}", bbox.min.x)}
                 y={format!("{}", bbox.min.y)}
                 width={format!("{}", bbox.width())}
@@ -197,8 +213,18 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
         html! {}
     };
 
+    // Format selected IDs as comma-separated string for test data attribute
+    let selection_ids_str = props.selected_ids.iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
     html! {
         <svg
+            data-testid="main-canvas"
+            data-selection-ids={selection_ids_str}
+            data-flip-x={props.flip_x.to_string()}
+            data-flip-y={props.flip_y.to_string()}
             style="position: absolute; top: 0; left: 0; z-index: 10; pointer-events: none;"
             width={format!("{}", props.width)}
             height={format!("{}", props.height)}

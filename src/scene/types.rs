@@ -101,6 +101,30 @@ impl Transform2D {
         }
     }
 
+    /// Builder method to set position
+    pub fn with_position(mut self, position: Vec2) -> Self {
+        self.position = position;
+        self
+    }
+
+    /// Builder method to set scale
+    pub fn with_scale(mut self, scale: Vec2) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    /// Builder method to set rotation (in radians)
+    pub fn with_rotation(mut self, rotation: f32) -> Self {
+        self.rotation = rotation;
+        self
+    }
+
+    /// Builder method to set anchor point
+    pub fn with_anchor(mut self, anchor: Vec2) -> Self {
+        self.anchor = anchor;
+        self
+    }
+
     /// Apply this transform to a point
     pub fn transform_point(&self, point: Vec2) -> Vec2 {
         // Translate to anchor, scale, rotate, translate back, then apply position
@@ -127,6 +151,11 @@ impl Transform2D {
         let anchor_offset = glam::Mat4::from_translation(glam::Vec3::new(-self.anchor.x, -self.anchor.y, 0.0));
 
         translation * rotation * scale * anchor_offset
+    }
+
+    /// Get the transformation matrix as a raw array for GPU uniform buffers
+    pub fn to_matrix4(&self) -> [[f32; 4]; 4] {
+        self.to_matrix().to_cols_array_2d()
     }
 }
 

@@ -6,11 +6,158 @@ use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions, StrokeTessellator,
     StrokeVertex, VertexBuffers,
 };
+use std::collections::HashMap;
+
+/// Convert an SVG elliptical arc to cubic bezier curves
+/// Based on the SVG arc implementation algorithm
+fn arc_to_beziers(
+    from: Vec2,
+    rx: f32,
+    ry: f32,
+    x_rotation: f32,
+    large_arc: bool,
+    sweep: bool,
+    to: Vec2,
+) -> Vec<(Vec2, Vec2, Vec2)> {
+    // Handle degenerate cases
+    if from == to {
+        return vec![];
+    }
+
+    let mut rx = rx.abs();
+    let mut ry = ry.abs();
+
+    if rx == 0.0 || ry == 0.0 {
+        // Treat as line
+        return vec![];
+    }
+
+    let phi = x_rotation.to_radians();
+    let cos_phi = phi.cos();
+    let sin_phi = phi.sin();
+
+    // Step 1: Compute (x1', y1')
+    let dx = (from.x - to.x) / 2.0;
+    let dy = (from.y - to.y) / 2.0;
+    let x1_prime = cos_phi * dx + sin_phi * dy;
+    let y1_prime = -sin_phi * dx + cos_phi * dy;
+
+    // Step 2: Compute (cx', cy')
+    let rx_sq = rx * rx;
+    let ry_sq = ry * ry;
+    let x1_prime_sq = x1_prime * x1_prime;
+    let y1_prime_sq = y1_prime * y1_prime;
+
+    // Check if radii are large enough
+    let lambda = x1_prime_sq / rx_sq + y1_prime_sq / ry_sq;
+    if lambda > 1.0 {
+        let lambda_sqrt = lambda.sqrt();
+        rx *= lambda_sqrt;
+        ry *= lambda_sqrt;
+    }
+
+    let rx_sq = rx * rx;
+    let ry_sq = ry * ry;
+
+    let num = rx_sq * ry_sq - rx_sq * y1_prime_sq - ry_sq * x1_prime_sq;
+    let den = rx_sq * y1_prime_sq + ry_sq * x1_prime_sq;
+
+    let sq = if den == 0.0 { 0.0 } else { (num / den).max(0.0).sqrt() };
+    let sq = if large_arc == sweep { -sq } else { sq };
+
+    let cx_prime = sq * rx * y1_prime / ry;
+    let cy_prime = -sq * ry * x1_prime / rx;
+
+    // Step 3: Compute (cx, cy) from (cx', cy')
+    let cx = cos_phi * cx_prime - sin_phi * cy_prime + (from.x + to.x) / 2.0;
+    let cy = sin_phi * cx_prime + cos_phi * cy_prime + (from.y + to.y) / 2.0;
+
+    // Step 4: Compute theta1 and dtheta
+    fn angle(ux: f32, uy: f32, vx: f32, vy: f32) -> f32 {
+        let n = (ux * ux + uy * uy).sqrt() * (vx * vx + vy * vy).sqrt();
+        if n == 0.0 {
+            return 0.0;
+        }
+        let c = (ux * vx + uy * vy) / n;
+        let c = c.clamp(-1.0, 1.0);
+        let angle = c.acos();
+        if ux * vy - uy * vx < 0.0 { -angle } else { angle }
+    }
+
+    let theta1 = angle(1.0, 0.0, (x1_prime - cx_prime) / rx, (y1_prime - cy_prime) / ry);
+    let mut dtheta = angle(
+        (x1_prime - cx_prime) / rx,
+        (y1_prime - cy_prime) / ry,
+        (-x1_prime - cx_prime) / rx,
+        (-y1_prime - cy_prime) / ry,
+    );
+
+    if !sweep && dtheta > 0.0 {
+        dtheta -= 2.0 * std::f32::consts::PI;
+    } else if sweep && dtheta < 0.0 {
+        dtheta += 2.0 * std::f32::consts::PI;
+    }
+
+    // Convert arc to bezier curves
+    // Split into segments of at most 90 degrees
+    let num_segments = ((dtheta.abs() / (std::f32::consts::PI / 2.0)).ceil() as usize).max(1);
+    let segment_angle = dtheta / num_segments as f32;
+
+    let mut curves = Vec::new();
+    let mut current_theta = theta1;
+
+    for _ in 0..num_segments {
+        let theta2 = current_theta + segment_angle;
+
+        // Compute bezier control points for this arc segment
+        let t = (segment_angle / 4.0).tan();
+        let alpha = segment_angle.sin() * ((4.0 + 3.0 * t * t).sqrt() - 1.0) / 3.0;
+
+        let cos_t1 = current_theta.cos();
+        let sin_t1 = current_theta.sin();
+        let cos_t2 = theta2.cos();
+        let sin_t2 = theta2.sin();
+
+        // Points on the unit circle
+        let p1x = cos_t1;
+        let p1y = sin_t1;
+        let p2x = cos_t2;
+        let p2y = sin_t2;
+
+        // Control points
+        let c1x = p1x - alpha * sin_t1;
+        let c1y = p1y + alpha * cos_t1;
+        let c2x = p2x + alpha * sin_t2;
+        let c2y = p2y - alpha * cos_t2;
+
+        // Transform from unit circle to actual ellipse
+        fn transform_point(px: f32, py: f32, rx: f32, ry: f32, cos_phi: f32, sin_phi: f32, cx: f32, cy: f32) -> Vec2 {
+            let x = rx * px;
+            let y = ry * py;
+            Vec2::new(
+                cos_phi * x - sin_phi * y + cx,
+                sin_phi * x + cos_phi * y + cy,
+            )
+        }
+
+        let ctrl1 = transform_point(c1x, c1y, rx, ry, cos_phi, sin_phi, cx, cy);
+        let ctrl2 = transform_point(c2x, c2y, rx, ry, cos_phi, sin_phi, cx, cy);
+        let end = transform_point(p2x, p2y, rx, ry, cos_phi, sin_phi, cx, cy);
+
+        curves.push((ctrl1, ctrl2, end));
+        current_theta = theta2;
+    }
+
+    curves
+}
 
 /// Tessellator for converting shapes to GPU-renderable triangles
+/// Includes a cache to avoid re-tessellating unchanged shapes
 pub struct Tessellator {
     fill_tessellator: FillTessellator,
     stroke_tessellator: StrokeTessellator,
+    /// Cache of tessellated meshes by shape ID
+    mesh_cache: HashMap<u64, Mesh>,
 }
 
 impl Default for Tessellator {
@@ -24,10 +171,66 @@ impl Tessellator {
         Self {
             fill_tessellator: FillTessellator::new(),
             stroke_tessellator: StrokeTessellator::new(),
+            mesh_cache: HashMap::new(),
         }
     }
 
-    /// Tessellate a shape into a mesh
+    /// Clear the mesh cache
+    pub fn clear_cache(&mut self) {
+        self.mesh_cache.clear();
+    }
+
+    /// Remove a specific shape from the cache
+    pub fn invalidate_shape(&mut self, shape_id: u64) {
+        self.mesh_cache.remove(&shape_id);
+    }
+
+    /// Get or create a cached mesh for a shape
+    /// Uses the shape's dirty flag to determine if re-tessellation is needed
+    /// IMPORTANT: This tessellates with identity transform - the actual transform
+    /// is applied in the shader via uniform
+    pub fn get_or_tessellate_shape(&mut self, shape: &Shape) -> &Mesh {
+        let shape_id = shape.id;
+
+        // Check if we need to re-tessellate
+        if shape.dirty || !self.mesh_cache.contains_key(&shape_id) {
+            let mesh = self.tessellate_shape_at_origin(shape);
+            self.mesh_cache.insert(shape_id, mesh);
+        }
+
+        self.mesh_cache.get(&shape_id).unwrap()
+    }
+
+    /// Tessellate a shape at origin (without applying shape's transform)
+    /// The transform will be applied in the shader
+    fn tessellate_shape_at_origin(&mut self, shape: &Shape) -> Mesh {
+        let mut mesh = Mesh::new();
+        let identity = Transform2D::identity();
+
+        // Tessellate fill if present
+        if let Some(fill_color) = shape.style.fill {
+            if let Some(fill_mesh) = self.tessellate_geometry_fill(&shape.geometry, &identity, fill_color) {
+                mesh.extend(&fill_mesh);
+            }
+        }
+
+        // Tessellate stroke if present
+        if let Some(stroke) = shape.style.stroke {
+            if let Some(stroke_mesh) = self.tessellate_geometry_stroke(
+                &shape.geometry,
+                &identity,
+                stroke.color,
+                stroke.width,
+            ) {
+                mesh.extend(&stroke_mesh);
+            }
+        }
+
+        mesh
+    }
+
+    /// Tessellate a shape into a mesh (includes shape's transform baked in)
+    /// Use get_or_tessellate_shape for cached version without transform
     pub fn tessellate_shape(&mut self, shape: &Shape) -> Mesh {
         let mut mesh = Mesh::new();
 
@@ -53,7 +256,8 @@ impl Tessellator {
         mesh
     }
 
-    /// Tessellate multiple shapes into a single mesh
+    /// Tessellate multiple shapes into a single mesh (legacy method)
+    /// For better performance, use get_or_tessellate_shape with per-shape rendering
     pub fn tessellate_shapes(&mut self, shapes: &[Shape]) -> Mesh {
         let mut mesh = Mesh::new();
         for shape in shapes {
@@ -562,6 +766,7 @@ impl Tessellator {
 
         let mut builder = Path::builder();
         let mut started = false;
+        let mut current_pos = Vec2::ZERO;
 
         for cmd in commands {
             match cmd {
@@ -572,11 +777,13 @@ impl Tessellator {
                     let tp = transform.transform_point(*p);
                     builder.begin(point(tp.x, tp.y));
                     started = true;
+                    current_pos = *p;
                 }
                 PathCommand::LineTo(p) => {
                     if started {
                         let tp = transform.transform_point(*p);
                         builder.line_to(point(tp.x, tp.y));
+                        current_pos = *p;
                     }
                 }
                 PathCommand::QuadraticTo { control, to } => {
@@ -584,6 +791,7 @@ impl Tessellator {
                         let ctrl = transform.transform_point(*control);
                         let end = transform.transform_point(*to);
                         builder.quadratic_bezier_to(point(ctrl.x, ctrl.y), point(end.x, end.y));
+                        current_pos = *to;
                     }
                 }
                 PathCommand::CubicTo { ctrl1, ctrl2, to } => {
@@ -596,6 +804,30 @@ impl Tessellator {
                             point(c2.x, c2.y),
                             point(end.x, end.y),
                         );
+                        current_pos = *to;
+                    }
+                }
+                PathCommand::ArcTo { rx, ry, x_rotation, large_arc, sweep, to } => {
+                    if started {
+                        // Convert arc to bezier curves
+                        let beziers = arc_to_beziers(current_pos, *rx, *ry, *x_rotation, *large_arc, *sweep, *to);
+                        if beziers.is_empty() {
+                            // Degenerate arc, draw line instead
+                            let tp = transform.transform_point(*to);
+                            builder.line_to(point(tp.x, tp.y));
+                        } else {
+                            for (ctrl1, ctrl2, end) in beziers {
+                                let c1 = transform.transform_point(ctrl1);
+                                let c2 = transform.transform_point(ctrl2);
+                                let e = transform.transform_point(end);
+                                builder.cubic_bezier_to(
+                                    point(c1.x, c1.y),
+                                    point(c2.x, c2.y),
+                                    point(e.x, e.y),
+                                );
+                            }
+                        }
+                        current_pos = *to;
                     }
                 }
                 PathCommand::Close => {
@@ -650,6 +882,7 @@ impl Tessellator {
 
         let mut builder = Path::builder();
         let mut started = false;
+        let mut current_pos = Vec2::ZERO;
 
         for cmd in commands {
             match cmd {
@@ -660,11 +893,13 @@ impl Tessellator {
                     let tp = transform.transform_point(*p);
                     builder.begin(point(tp.x, tp.y));
                     started = true;
+                    current_pos = *p;
                 }
                 PathCommand::LineTo(p) => {
                     if started {
                         let tp = transform.transform_point(*p);
                         builder.line_to(point(tp.x, tp.y));
+                        current_pos = *p;
                     }
                 }
                 PathCommand::QuadraticTo { control, to } => {
@@ -672,6 +907,7 @@ impl Tessellator {
                         let ctrl = transform.transform_point(*control);
                         let end = transform.transform_point(*to);
                         builder.quadratic_bezier_to(point(ctrl.x, ctrl.y), point(end.x, end.y));
+                        current_pos = *to;
                     }
                 }
                 PathCommand::CubicTo { ctrl1, ctrl2, to } => {
@@ -684,6 +920,30 @@ impl Tessellator {
                             point(c2.x, c2.y),
                             point(end.x, end.y),
                         );
+                        current_pos = *to;
+                    }
+                }
+                PathCommand::ArcTo { rx, ry, x_rotation, large_arc, sweep, to } => {
+                    if started {
+                        // Convert arc to bezier curves
+                        let beziers = arc_to_beziers(current_pos, *rx, *ry, *x_rotation, *large_arc, *sweep, *to);
+                        if beziers.is_empty() {
+                            // Degenerate arc, draw line instead
+                            let tp = transform.transform_point(*to);
+                            builder.line_to(point(tp.x, tp.y));
+                        } else {
+                            for (ctrl1, ctrl2, end) in beziers {
+                                let c1 = transform.transform_point(ctrl1);
+                                let c2 = transform.transform_point(ctrl2);
+                                let e = transform.transform_point(end);
+                                builder.cubic_bezier_to(
+                                    point(c1.x, c1.y),
+                                    point(c2.x, c2.y),
+                                    point(e.x, e.y),
+                                );
+                            }
+                        }
+                        current_pos = *to;
                     }
                 }
                 PathCommand::Close => {
