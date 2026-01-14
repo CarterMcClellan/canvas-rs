@@ -918,9 +918,9 @@ pub fn resizable_canvas() -> Html {
                 let translation_state = translation_state.clone();
                 let fixed_anchor = fixed_anchor.clone();
                 let dimensions = dimensions.clone();
-                let _shapes_for_snap = shapes_for_snap.clone();
-                let _selected_ids = selected_ids.clone();
-                let _guidelines = guidelines.clone();
+                let shapes_for_snap = shapes_for_snap.clone();
+                let selected_ids_for_snap = selected_ids.clone();
+                let guidelines_for_snap = guidelines.clone();
 
                 EventListener::new(&window, "mousemove", move |event| {
                     let mouse_event = event.dyn_ref::<MouseEvent>().unwrap();
@@ -931,14 +931,37 @@ pub fn resizable_canvas() -> Html {
                             let delta_x = point.x - start_point.x;
                             let delta_y = point.y - start_point.y;
 
-                            // Note: Snapping disabled for now - would need to update snap_logic
-                            // to work with shapes instead of polygons
-                            let _dims = *dimensions;
-                            let _anchor = *fixed_anchor;
+                            let dims = *dimensions;
+                            let anchor = *fixed_anchor;
 
-                            let new_trans = Point::new(delta_x, delta_y);
+                            // Calculate proposed bounding box after translation
+                            let proposed_box = BoundingBox::new(
+                                anchor.x + delta_x,
+                                anchor.y + delta_y,
+                                dims.width,
+                                dims.height,
+                            );
+
+                            // Calculate snap (10px threshold)
+                            let snap_result = calculate_snap(
+                                &proposed_box,
+                                &shapes_for_snap,
+                                &selected_ids_for_snap,
+                                CANVAS_WIDTH,
+                                CANVAS_HEIGHT,
+                                10.0,
+                            );
+
+                            // Apply snapped translation
+                            let new_trans = Point::new(
+                                delta_x + snap_result.translation.x,
+                                delta_y + snap_result.translation.y,
+                            );
                             *translation.borrow_mut() = new_trans;
-                            translation_state.set(new_trans);  // Trigger re-render for GPU transform
+                            translation_state.set(new_trans);
+
+                            // Update guidelines for rendering
+                            guidelines_for_snap.set(snap_result.guidelines);
                         }
                     }
                 })
