@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use crate::types::*;
 use crate::utils::*;
+use crate::snap_logic::calculate_snap;
 use crate::layers_panel::{LayersPanel, ShapeInfo};
 use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
@@ -808,8 +809,12 @@ pub fn resizable_canvas() -> Html {
         let is_moving = is_moving.clone();
         let svg_ref = svg_ref.clone();
         let move_start = move_start.clone();
+        let fixed_anchor = fixed_anchor.clone();
+        let dimensions = dimensions.clone();
         let translation = translation.clone();
         let translation_state = translation_state.clone();
+        let shapes_for_snap = shapes.clone();
+        let selected_ids = selected_ids.clone();
         let guidelines = guidelines.clone();
         let commit_transform = commit_selection_transform.clone();
 
