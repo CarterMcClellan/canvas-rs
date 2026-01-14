@@ -6,6 +6,7 @@ mod layers_panel;
 mod properties_panel;
 mod chat_panel;
 mod demo_paths;
+mod snap_logic;
 
 // GPU rendering modules (Phase 1+)
 pub mod components;
