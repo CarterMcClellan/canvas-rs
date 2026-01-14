@@ -30,3 +30,6 @@ tests/playwright-report/
 tests/playwright/.cache/
 
 target
+
+# Videos
+*.mp4
