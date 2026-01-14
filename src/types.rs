@@ -186,4 +186,5 @@ impl Message {
 pub enum ActiveTab {
     Design,
     Chat,
+    Versions,
 }

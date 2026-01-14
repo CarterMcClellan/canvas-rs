@@ -5,6 +5,8 @@ mod utils;
 mod layers_panel;
 mod properties_panel;
 mod chat_panel;
+mod version;
+mod version_panel;
 mod demo_paths;
 mod snap_logic;
 

@@ -55,10 +55,9 @@ pub fn chat_panel(props: &ChatPanelProps) -> Html {
     };
 
     html! {
-        <div class="w-80 flex-none bg-white border-l border-gray-300 flex flex-col">
+        <div class="flex flex-col flex-1">
             <div class="p-4 border-b border-gray-300">
                 <h2 class="text-lg font-semibold">{"Chat"}</h2>
-                <p class="text-xs text-gray-500 mt-1">{"Cmd/Ctrl+K to toggle"}</p>
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 space-y-3">

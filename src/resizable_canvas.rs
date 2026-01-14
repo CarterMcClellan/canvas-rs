@@ -4,6 +4,7 @@ use wasm_bindgen::JsCast;
 use gloo::events::EventListener;
 use std::rc::Rc;
 use std::collections::HashMap;
+use web_sys::js_sys;
 
 use crate::types::*;
 use crate::utils::*;
@@ -11,6 +12,8 @@ use crate::snap_logic::calculate_snap;
 use crate::layers_panel::{LayersPanel, ShapeInfo};
 use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
+use crate::version::VersionHistory;
+use crate::version_panel::VersionHistoryPanel;
 use crate::components::GpuCanvas;
 use crate::scene::{Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox, Color, Transform2D};
 use crate::demo_paths::create_demo_shapes;
@@ -159,6 +162,99 @@ fn calculate_shapes_bounding_box(shapes: &[Shape]) -> BoundingBox {
     )
 }
 
+// Right Panel Component with Tab Bar
+#[derive(Properties, PartialEq)]
+pub struct RightPanelProps {
+    pub active_tab: ActiveTab,
+    pub has_unsaved_changes: bool,
+    pub on_tab_change: Callback<ActiveTab>,
+    pub selected_polygon: Option<Polygon>,
+    pub properties_bbox: Option<BoundingBox>,
+    pub on_update_fill: Callback<String>,
+    pub on_update_stroke: Callback<String>,
+    pub on_update_position: Callback<(f64, f64)>,
+    pub on_update_dimensions: Callback<(f64, f64)>,
+    pub chat_messages: Vec<Message>,
+    pub on_send_message: Callback<String>,
+    pub version_history: VersionHistory,
+    pub on_save_version: Callback<()>,
+    pub on_restore_version: Callback<usize>,
+}
+
+#[function_component(RightPanel)]
+fn right_panel(props: &RightPanelProps) -> Html {
+    let on_tab_change = props.on_tab_change.clone();
+
+    html! {
+        <div class="w-80 flex-none bg-white border-l border-gray-300 flex flex-col">
+            // Tab Bar
+            <div class="flex border-b border-gray-200">
+                <button
+                    onclick={on_tab_change.reform(|_| ActiveTab::Design)}
+                    class={classes!(
+                        "flex-1", "px-4", "py-2", "text-sm", "font-medium", "border-b-2", "transition-colors",
+                        if props.active_tab == ActiveTab::Design { "border-blue-500 text-blue-600" } else { "border-transparent text-gray-500 hover:text-gray-700" }
+                    )}
+                >
+                    {"Design"}
+                </button>
+                <button
+                    onclick={on_tab_change.reform(|_| ActiveTab::Chat)}
+                    class={classes!(
+                        "flex-1", "px-4", "py-2", "text-sm", "font-medium", "border-b-2", "transition-colors",
+                        if props.active_tab == ActiveTab::Chat { "border-blue-500 text-blue-600" } else { "border-transparent text-gray-500 hover:text-gray-700" }
+                    )}
+                >
+                    {"Chat"}
+                </button>
+                <button
+                    onclick={on_tab_change.reform(|_| ActiveTab::Versions)}
+                    class={classes!(
+                        "flex-1", "px-4", "py-2", "text-sm", "font-medium", "border-b-2", "transition-colors", "relative",
+                        if props.active_tab == ActiveTab::Versions { "border-blue-500 text-blue-600" } else { "border-transparent text-gray-500 hover:text-gray-700" }
+                    )}
+                >
+                    {"Versions"}
+                    if props.has_unsaved_changes {
+                        <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
+                    }
+                </button>
+            </div>
+
+            // Panel Content
+            if props.active_tab == ActiveTab::Design {
+                <div class="flex-1 overflow-y-auto p-4">
+                    <PropertiesPanel
+                        active_tab={props.active_tab}
+                        selected_polygon={props.selected_polygon.clone()}
+                        bounding_box={props.properties_bbox}
+                        on_update_fill={props.on_update_fill.clone()}
+                        on_update_stroke={props.on_update_stroke.clone()}
+                        on_update_position={props.on_update_position.clone()}
+                        on_update_dimensions={props.on_update_dimensions.clone()}
+                    />
+                </div>
+            }
+            if props.active_tab == ActiveTab::Chat {
+                <ChatPanel
+                    active_tab={props.active_tab}
+                    messages={props.chat_messages.clone()}
+                    on_send_message={props.on_send_message.clone()}
+                />
+            }
+            if props.active_tab == ActiveTab::Versions {
+                <VersionHistoryPanel
+                    active_tab={props.active_tab}
+                    history={props.version_history.clone()}
+                    has_unsaved_changes={props.has_unsaved_changes}
+                    on_save_version={props.on_save_version.clone()}
+                    on_restore_version={props.on_restore_version.clone()}
+                />
+            }
+        </div>
+    }
+}
+
 #[function_component(ResizableCanvas)]
 pub fn resizable_canvas() -> Html {
     // State - unified shapes list (triangles + demo shapes like Snoopy)
@@ -182,6 +278,10 @@ pub fn resizable_canvas() -> Html {
         Message::assistant("Hello! I'm your design assistant. How can I help you today?".to_string())
     ]);
 
+    // Version history
+    let version_history = use_state(VersionHistory::new);
+    let has_unsaved_changes = use_state(|| true);  // Start as true (initial state is unsaved)
+
     // GPU rendering
     let render_version = use_state(|| 0u32);
 
@@ -192,7 +292,7 @@ pub fn resizable_canvas() -> Html {
     let resize_base_signed = use_mut_ref(|| None::<Dimensions>);
     let resize_current_dims = use_mut_ref(|| None::<Dimensions>);
 
-    // Keyboard shortcut for Cmd/Ctrl+K (toggle Design/Chat tabs)
+    // Keyboard shortcut for Cmd/Ctrl+K (cycle through tabs: Design -> Chat -> Versions -> Design)
     {
         let active_tab = active_tab.clone();
         use_effect_with((), move |_| {
@@ -207,7 +307,8 @@ pub fn resizable_canvas() -> Html {
                         keyboard_event.prevent_default();
                         active_tab.set(match *active_tab {
                             ActiveTab::Design => ActiveTab::Chat,
-                            ActiveTab::Chat => ActiveTab::Design,
+                            ActiveTab::Chat => ActiveTab::Versions,
+                            ActiveTab::Versions => ActiveTab::Design,
                         });
                     }
                 }
@@ -336,6 +437,7 @@ pub fn resizable_canvas() -> Html {
         let resize_base_signed = resize_base_signed.clone();
         let resize_start_anchor = resize_start_anchor.clone();
         let resize_current_dims = resize_current_dims.clone();
+        let has_unsaved_changes = has_unsaved_changes.clone();
 
         Callback::from(move |_: ()| {
             if selected_ids.is_empty() {
@@ -421,6 +523,9 @@ pub fn resizable_canvas() -> Html {
             resize_base_signed.replace(None);
             resize_start_anchor.replace(None);
             resize_current_dims.replace(None);
+
+            // Mark as having unsaved changes
+            has_unsaved_changes.set(true);
         })
     };
 
@@ -449,6 +554,70 @@ pub fn resizable_canvas() -> Html {
     let on_update_stroke = Callback::from(|_stroke: String| {});
     let on_update_position = Callback::from(|_pos: (f64, f64)| {});
     let on_update_dimensions = Callback::from(|_dims: (f64, f64)| {});
+
+    // Version history handlers
+    let on_save_version = {
+        let shapes = shapes.clone();
+        let version_history = version_history.clone();
+        let has_unsaved_changes = has_unsaved_changes.clone();
+
+        Callback::from(move |_: ()| {
+            let mut history = (*version_history).clone();
+            let timestamp = js_sys::Date::now();
+            history.save_version((*shapes).clone(), None, timestamp);
+            version_history.set(history);
+            has_unsaved_changes.set(false);
+        })
+    };
+
+    let on_restore_version = {
+        let shapes = shapes.clone();
+        let version_history = version_history.clone();
+        let selected_ids = selected_ids.clone();
+        let has_unsaved_changes = has_unsaved_changes.clone();
+        let fixed_anchor = fixed_anchor.clone();
+        let dimensions = dimensions.clone();
+        let base_dimensions = base_dimensions.clone();
+        let translation = translation.clone();
+        let translation_state = translation_state.clone();
+        let render_version = render_version.clone();
+
+        Callback::from(move |version_idx: usize| {
+            let mut history = (*version_history).clone();
+
+            if let Some(version) = history.get_version(version_idx) {
+                // Clone shapes and mark them all as dirty to force re-tessellation
+                let mut restored_shapes = version.shapes.clone();
+                for shape in &mut restored_shapes {
+                    shape.mark_dirty();
+                }
+                shapes.set(restored_shapes);
+
+                history.set_current_version(version_idx);
+                version_history.set(history);
+
+                // Clear selection and reset UI state
+                selected_ids.set(Vec::new());
+                fixed_anchor.set(Point::new(150.0, 150.0));
+                dimensions.set(Dimensions::new(100.0, 100.0));
+                base_dimensions.set(Dimensions::new(100.0, 100.0));
+                *translation.borrow_mut() = Point::zero();
+                translation_state.set(Point::zero());
+                has_unsaved_changes.set(false);
+
+                // Trigger GPU canvas re-render
+                render_version.set(*render_version + 1);
+            }
+        })
+    };
+
+    // Tab change handlers
+    let on_tab_click = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |tab: ActiveTab| {
+            active_tab.set(tab);
+        })
+    };
 
     // Commit marquee selection when mouseup occurs
     let on_svg_mouseup = {
@@ -1123,24 +1292,23 @@ pub fn resizable_canvas() -> Html {
                 </div>
             </div>
 
-            // Right Panel (Properties or Chat based on active tab)
-            if *active_tab == ActiveTab::Design {
-                <PropertiesPanel
-                    active_tab={*active_tab}
-                    selected_polygon={selected_polygon}
-                    bounding_box={properties_bbox}
-                    on_update_fill={on_update_fill}
-                    on_update_stroke={on_update_stroke}
-                    on_update_position={on_update_position}
-                    on_update_dimensions={on_update_dimensions}
-                />
-            } else {
-                <ChatPanel
-                    active_tab={*active_tab}
-                    messages={(*chat_messages).clone()}
-                    on_send_message={on_send_message}
-                />
-            }
+            // Right Panel with Tab Bar
+            <RightPanel
+                active_tab={*active_tab}
+                has_unsaved_changes={*has_unsaved_changes}
+                on_tab_change={on_tab_click.clone()}
+                selected_polygon={selected_polygon}
+                properties_bbox={properties_bbox}
+                on_update_fill={on_update_fill}
+                on_update_stroke={on_update_stroke}
+                on_update_position={on_update_position}
+                on_update_dimensions={on_update_dimensions}
+                chat_messages={(*chat_messages).clone()}
+                on_send_message={on_send_message}
+                version_history={(*version_history).clone()}
+                on_save_version={on_save_version.clone()}
+                on_restore_version={on_restore_version.clone()}
+            />
         </div>
     }
 }
