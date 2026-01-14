@@ -214,7 +214,8 @@ pub fn canvas_overlay(props: &OverlayProps) -> Html {
     };
 
     // Format selected IDs as comma-separated string for test data attribute
-    let selection_ids_str = props.selected_ids.iter()
+    let selection_ids_str = props.selected_ids
+        .iter()
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
