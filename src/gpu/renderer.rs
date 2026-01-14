@@ -470,15 +470,3 @@ impl Renderer {
         Ok(())
     }
 }
-
-/// Create a simple triangle mesh for testing
-pub fn test_triangle() -> Mesh {
-    let vertices = vec![
-        Vertex::new([400.0, 100.0], [1.0, 0.0, 0.0, 1.0]), // Top - Red
-        Vertex::new([200.0, 500.0], [0.0, 1.0, 0.0, 1.0]), // Bottom left - Green
-        Vertex::new([600.0, 500.0], [0.0, 0.0, 1.0, 1.0]), // Bottom right - Blue
-    ];
-    let indices = vec![0, 1, 2];
-
-    Mesh { vertices, indices }
-}

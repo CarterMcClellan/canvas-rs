@@ -1,6 +1,5 @@
 mod app;
 mod resizable_canvas;
-mod snap_logic;
 mod types;
 mod utils;
 mod layers_panel;
