@@ -78,7 +78,6 @@ fn bbox_to_scene_bbox(bbox: &BoundingBox) -> BBox {
 const CANVAS_WIDTH: f64 = 800.0;
 const CANVAS_HEIGHT: f64 = 600.0;
 const MIN_SIZE: f64 = 10.0;
-const SNAP_THRESHOLD: f64 = 5.0;
 
 /// Create a triangle shape from points
 fn create_triangle_shape(p1: Vec2, p2: Vec2, p3: Vec2, fill: Color, stroke: Color) -> Shape {
