@@ -40,15 +40,6 @@ impl BoundingBox {
     pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
         Self { x, y, width, height }
     }
-
-    pub fn from_points_and_dimensions(point: Point, dimensions: Dimensions) -> Self {
-        Self {
-            x: point.x,
-            y: point.y,
-            width: dimensions.width,
-            height: dimensions.height,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -66,33 +57,6 @@ impl Polygon {
             fill,
             stroke,
             stroke_width,
-        }
-    }
-
-    pub fn default_triangle_1() -> Self {
-        Self {
-            points: "230,220 260,220 245,250".to_string(),
-            fill: "#ef4444".to_string(),
-            stroke: "#000000".to_string(),
-            stroke_width: 1.0,
-        }
-    }
-
-    pub fn default_triangle_2() -> Self {
-        Self {
-            points: "270,230 300,230 285,260".to_string(),
-            fill: "#3b82f6".to_string(),
-            stroke: "#000000".to_string(),
-            stroke_width: 1.0,
-        }
-    }
-
-    pub fn default_triangle_3() -> Self {
-        Self {
-            points: "240,270 270,270 255,300".to_string(),
-            fill: "#22c55e".to_string(),
-            stroke: "#000000".to_string(),
-            stroke_width: 1.0,
         }
     }
 }
@@ -120,14 +84,6 @@ impl Guideline {
             end,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct ResizeTransform {
-    pub width: f64,
-    pub height: f64,
-    pub anchor_x: f64,
-    pub anchor_y: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -175,9 +131,7 @@ impl HandleName {
             HandleName::TopLeft => "top-left",
         }
     }
-}
 
-impl HandleName {
     pub fn cursor(&self) -> &'static str {
         match self {
             HandleName::Right => "ew-resize",
@@ -199,35 +153,6 @@ impl HandleName {
                 | HandleName::BottomLeft
                 | HandleName::BottomRight
         )
-    }
-
-    pub fn calc_position(&self, bbox: &BoundingBox) -> Point {
-        match self {
-            HandleName::Right => Point::new(bbox.x + bbox.width, bbox.y + bbox.height / 2.0),
-            HandleName::Left => Point::new(bbox.x, bbox.y + bbox.height / 2.0),
-            HandleName::Top => Point::new(bbox.x + bbox.width / 2.0, bbox.y),
-            HandleName::Bottom => Point::new(bbox.x + bbox.width / 2.0, bbox.y + bbox.height),
-            HandleName::TopLeft => Point::new(bbox.x, bbox.y),
-            HandleName::TopRight => Point::new(bbox.x + bbox.width, bbox.y),
-            HandleName::BottomLeft => Point::new(bbox.x, bbox.y + bbox.height),
-            HandleName::BottomRight => Point::new(bbox.x + bbox.width, bbox.y + bbox.height),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct FlipState {
-    pub x: bool,
-    pub y: bool,
-}
-
-impl FlipState {
-    pub fn new(x: bool, y: bool) -> Self {
-        Self { x, y }
-    }
-
-    pub fn none() -> Self {
-        Self { x: false, y: false }
     }
 }
 
