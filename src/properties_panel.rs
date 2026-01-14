@@ -15,7 +15,7 @@ pub struct PropertiesPanelProps {
 
 #[function_component(PropertiesPanel)]
 pub fn properties_panel(props: &PropertiesPanelProps) -> Html {
-    if props.active_tab == ActiveTab::Chat {
+    if props.active_tab != ActiveTab::Design {
         return html! {};
     }
 
@@ -23,7 +23,7 @@ pub fn properties_panel(props: &PropertiesPanelProps) -> Html {
     let bbox = props.bounding_box.as_ref();
 
     html! {
-        <div class="w-80 flex-none bg-white border-l border-gray-300 p-4 overflow-y-auto">
+        <>
             <h2 class="text-lg font-semibold pb-3 mb-4 border-b border-gray-200">{"Properties"}</h2>
 
             if selected.is_some() && bbox.is_some() {
@@ -195,6 +195,6 @@ pub fn properties_panel(props: &PropertiesPanelProps) -> Html {
             } else {
                 <p class="text-sm text-gray-500">{"Select a shape to edit its properties"}</p>
             }
-        </div>
+        </>
     }
 }

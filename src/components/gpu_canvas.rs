@@ -152,6 +152,7 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
         let shapes = props.shapes.clone();
         let background_color = props.background_color;
         let transform_overrides = props.transform_overrides.clone();
+        let render_version = props.render_version;
 
         // Create a lightweight dependency: shape IDs, dirty flags, and transform overrides
         // This avoids cloning entire shape geometries
@@ -166,7 +167,7 @@ pub fn gpu_canvas(props: &GpuCanvasProps) -> Html {
             .fold(0u64, |acc, x| acc.wrapping_add(x));
 
         use_effect_with(
-            (renderer_state_clone.is_some(), shape_deps, override_keys, override_hash),
+            (renderer_state_clone.is_some(), shape_deps, override_keys, override_hash, render_version),
             move |_| {
                 if let Some(ref state) = renderer_state_clone {
                     let mut state = state.borrow_mut();
