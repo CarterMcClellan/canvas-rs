@@ -5,24 +5,23 @@ use gloo::events::EventListener;
 use std::rc::Rc;
 use std::collections::HashMap;
 use web_sys::js_sys;
-
 use crate::types::*;
 use crate::utils::*;
 use crate::snap_logic::calculate_snap;
-use crate::layers_panel::{LayersPanel, ShapeInfo};
+use crate::layers_panel::{LayersPanel, ShapeInfo, ShapeType};
 use crate::properties_panel::PropertiesPanel;
 use crate::chat_panel::ChatPanel;
 use crate::version::VersionHistory;
 use crate::version_panel::VersionHistoryPanel;
 use crate::components::GpuCanvas;
-use crate::scene::{Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox, Color, Transform2D};
-use crate::demo_paths::create_demo_shapes;
+use crate::scene::{Shape, ShapeGeometry, ShapeStyle, StrokeStyle, Vec2, BBox, Color, Transform2D, LayerTree, LayerNode};
+use crate::demo_paths::{create_snoopy_shapes, create_heart_shape, create_star_shape, create_flower_shape, create_spiral_shape};
 
 /// Compute GPU transform overrides for selected shapes during drag/scale operations
 /// Returns a map of shape ID -> transform matrix that overrides the shape's base transform
 fn compute_transform_overrides(
     shapes: &[Shape],
-    selected_ids: &[usize],
+    selected_ids: &[u64],
     fixed_anchor: &Point,
     translation: &Point,
     scale_x: f64,
@@ -61,10 +60,10 @@ fn compute_transform_overrides(
 
     let transform_matrix = from_origin * scale * to_origin;
 
-    // Apply the same transform to all selected shapes
-    for &idx in selected_ids {
-        if let Some(shape) = shapes.get(idx) {
-            overrides.insert(shape.id, transform_matrix.to_cols_array_2d());
+    // Apply the same transform to all selected shapes by ID
+    for &shape_id in selected_ids {
+        if shapes.iter().any(|s| s.id == shape_id) {
+            overrides.insert(shape_id, transform_matrix.to_cols_array_2d());
         }
     }
 
@@ -95,44 +94,108 @@ fn create_triangle_shape(p1: Vec2, p2: Vec2, p3: Vec2, fill: Color, stroke: Colo
     Shape::new(geometry, style)
 }
 
-/// Get all initial shapes - triangles plus demo shapes (Snoopy, etc.)
-fn get_initial_shapes() -> Vec<Shape> {
+/// Get all initial shapes and layer tree with Snoopy and Flower pre-grouped
+fn get_initial_shapes_and_tree() -> (Vec<Shape>, LayerTree) {
     let mut shapes = Vec::new();
+    let mut tree = LayerTree::new();
 
     // Triangle 1 (red)
     let red = Color::from_hex("#ff6347").unwrap_or_else(Color::black);
-    shapes.push(create_triangle_shape(
+    let tri1 = create_triangle_shape(
         Vec2::new(230.0, 220.0),
         Vec2::new(260.0, 220.0),
         Vec2::new(245.0, 250.0),
         red,
         Color::black(),
-    ));
+    );
+    tree.add_shape(tri1.id);
+    shapes.push(tri1);
 
     // Triangle 2 (blue)
     let blue = Color::from_hex("#4682b4").unwrap_or_else(Color::black);
-    shapes.push(create_triangle_shape(
+    let tri2 = create_triangle_shape(
         Vec2::new(270.0, 230.0),
         Vec2::new(300.0, 230.0),
         Vec2::new(285.0, 260.0),
         blue,
         Color::black(),
-    ));
+    );
+    tree.add_shape(tri2.id);
+    shapes.push(tri2);
 
     // Triangle 3 (green)
     let green = Color::from_hex("#9acd32").unwrap_or_else(Color::black);
-    shapes.push(create_triangle_shape(
+    let tri3 = create_triangle_shape(
         Vec2::new(240.0, 270.0),
         Vec2::new(270.0, 270.0),
         Vec2::new(255.0, 300.0),
         green,
         Color::black(),
-    ));
+    );
+    tree.add_shape(tri3.id);
+    shapes.push(tri3);
 
-    // Add demo shapes (Snoopy, heart, star, flower, spiral)
-    shapes.extend(create_demo_shapes());
+    // Snoopy shapes - will be grouped
+    let snoopy_shapes = create_snoopy_shapes(400.0, 150.0, 2.5);
+    let snoopy_ids: Vec<u64> = snoopy_shapes.iter().map(|s| s.id).collect();
+    for shape in &snoopy_shapes {
+        tree.add_shape(shape.id);
+    }
+    shapes.extend(snoopy_shapes);
 
-    shapes
+    // Heart
+    let heart = create_heart_shape(50.0, 350.0, 80.0, Color::rgb(1.0, 0.2, 0.3));
+    tree.add_shape(heart.id);
+    shapes.push(heart);
+
+    // Star
+    let star = create_star_shape(200.0, 400.0, 50.0, 20.0, 5, Color::rgb(1.0, 0.8, 0.0));
+    tree.add_shape(star.id);
+    shapes.push(star);
+
+    // Flower shapes - will be grouped
+    let flower_shapes = create_flower_shape(650.0, 400.0, 60.0);
+    let flower_ids: Vec<u64> = flower_shapes.iter().map(|s| s.id).collect();
+    for shape in &flower_shapes {
+        tree.add_shape(shape.id);
+    }
+    shapes.extend(flower_shapes);
+
+    // Spiral
+    let spiral = create_spiral_shape(550.0, 500.0, 3, Color::rgb(0.2, 0.5, 0.9));
+    tree.add_shape(spiral.id);
+    shapes.push(spiral);
+
+    // Now group Snoopy and Flower
+    tree.group_shapes(&snoopy_ids);
+    tree.group_shapes(&flower_ids);
+
+    // Rename the groups
+    // Find and rename Snoopy group (contains first snoopy shape)
+    if let Some(snoopy_first_id) = snoopy_ids.first() {
+        for node in &tree.nodes {
+            if let LayerNode::Group { id, .. } = node {
+                if node.contains_shape(*snoopy_first_id) {
+                    tree.rename_group(*id, "Snoopy".to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    // Find and rename Flower group
+    if let Some(flower_first_id) = flower_ids.first() {
+        for node in &tree.nodes {
+            if let LayerNode::Group { id, .. } = node {
+                if node.contains_shape(*flower_first_id) {
+                    tree.rename_group(*id, "Flower".to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    (shapes, tree)
 }
 
 /// Calculate bounding box for a set of shapes
@@ -258,8 +321,16 @@ fn right_panel(props: &RightPanelProps) -> Html {
 #[function_component(ResizableCanvas)]
 pub fn resizable_canvas() -> Html {
     // State - unified shapes list (triangles + demo shapes like Snoopy)
-    let shapes = use_state(get_initial_shapes);
-    let selected_ids = use_state(|| Vec::<usize>::new());
+    // Initialize both shapes and layer tree together with pre-grouped Snoopy and Flower
+    let initial_data = use_memo((), |_| {
+        get_initial_shapes_and_tree()
+    });
+
+    let shapes = use_state(|| initial_data.0.clone());
+    let selected_ids = use_state(|| Vec::<u64>::new());
+
+    // Layer tree for grouping - synced with shapes
+    let layer_tree = use_state(|| initial_data.1.clone());
     let fixed_anchor = use_state(|| Point::new(150.0, 150.0));
     let dimensions = use_state(|| Dimensions::new(100.0, 100.0));
     let base_dimensions = use_state(|| Dimensions::new(100.0, 100.0));
@@ -268,7 +339,7 @@ pub fn resizable_canvas() -> Html {
     let is_dragging = use_state(|| false);
     let is_moving = use_state(|| false);
     let active_handle = use_state(|| None::<HandleName>);
-    let hovered_id = use_state(|| None::<usize>);
+    let hovered_id = use_state(|| None::<u64>);
     let selection_rect = use_state(|| None::<SelectionRect>);
     let selection_origin = use_state(|| None::<Point>);
     let guidelines = use_state(|| Vec::<Guideline>::new());
@@ -292,6 +363,11 @@ pub fn resizable_canvas() -> Html {
     let resize_base_signed = use_mut_ref(|| None::<Dimensions>);
     let resize_current_dims = use_mut_ref(|| None::<Dimensions>);
 
+    // Refs for keyboard handler to access current values
+    // Updated directly when state changes (no sync effects needed)
+    let selected_ids_ref = use_mut_ref(|| Vec::<u64>::new());
+    let layer_tree_ref = use_mut_ref(|| initial_data.1.clone());
+
     // Keyboard shortcut for Cmd/Ctrl+K (cycle through tabs: Design -> Chat -> Versions -> Design)
     {
         let active_tab = active_tab.clone();
@@ -310,6 +386,58 @@ pub fn resizable_canvas() -> Html {
                             ActiveTab::Chat => ActiveTab::Versions,
                             ActiveTab::Versions => ActiveTab::Design,
                         });
+                    }
+                }
+            });
+
+            move || drop(listener)
+        });
+    }
+
+    // Keyboard shortcut for Cmd/Ctrl+G (group selected shapes)
+    // Use capture phase to intercept before Chrome's "Find Next" handler
+    {
+        let layer_tree = layer_tree.clone();
+        let selected_ids_ref = selected_ids_ref.clone();
+        let layer_tree_ref = layer_tree_ref.clone();
+        let has_unsaved_changes = has_unsaved_changes.clone();
+        use_effect_with((), move |_| {
+            let window = web_sys::window().expect("no window");
+            let document = window.document().expect("no document");
+
+            // Use EventListenerOptions with capture: true to intercept before browser
+            let options = gloo::events::EventListenerOptions::enable_prevent_default();
+            let listener = EventListener::new_with_options(&document, "keydown", options, move |event| {
+                if let Some(keyboard_event) = event.dyn_ref::<web_sys::KeyboardEvent>() {
+                    if (keyboard_event.meta_key() || keyboard_event.ctrl_key())
+                        && keyboard_event.key() == "g"
+                    {
+                        // Stop the event from reaching Chrome's handlers
+                        keyboard_event.prevent_default();
+                        keyboard_event.stop_propagation();
+                        keyboard_event.stop_immediate_propagation();
+
+                        // Read current values from refs
+                        let ids = selected_ids_ref.borrow().clone();
+                        web_sys::console::log_1(&format!("Cmd+G pressed, selected_ids: {:?}", ids).into());
+
+                        if ids.len() >= 2 {
+                            let mut updated_tree = layer_tree_ref.borrow().clone();
+                            web_sys::console::log_1(&format!("Layer tree before: {:?}", updated_tree.nodes).into());
+
+                            if let Some(group_id) = updated_tree.group_shapes(&ids) {
+                                web_sys::console::log_1(&format!("Created group with id: {}", group_id).into());
+                                web_sys::console::log_1(&format!("Layer tree after: {:?}", updated_tree.nodes).into());
+                                // Update both the state and the ref
+                                *layer_tree_ref.borrow_mut() = updated_tree.clone();
+                                layer_tree.set(updated_tree);
+                                has_unsaved_changes.set(true);
+                            } else {
+                                web_sys::console::log_1(&"group_shapes returned None".into());
+                            }
+                        } else {
+                            web_sys::console::log_1(&format!("Need 2+ shapes, got {}", ids.len()).into());
+                        }
                     }
                 }
             });
@@ -348,43 +476,11 @@ pub fn resizable_canvas() -> Html {
         current_dims.height.abs(),
     );
 
-    // Reset handler
-    let on_reset = {
-        let shapes = shapes.clone();
-        let selected_ids = selected_ids.clone();
-        let fixed_anchor = fixed_anchor.clone();
-        let dimensions = dimensions.clone();
-        let base_dimensions = base_dimensions.clone();
-        let translation = translation.clone();
-        let translation_state = translation_state.clone();
-        let selection_rect = selection_rect.clone();
-        let selection_origin = selection_origin.clone();
-        let guidelines = guidelines.clone();
-        let preview_bbox = preview_bbox.clone();
-        let resize_base_signed = resize_base_signed.clone();
-        let resize_start_anchor = resize_start_anchor.clone();
-
-        Callback::from(move |_| {
-            shapes.set(get_initial_shapes());
-            selected_ids.set(Vec::new());
-            fixed_anchor.set(Point::new(150.0, 150.0));
-            dimensions.set(Dimensions::new(100.0, 100.0));
-            base_dimensions.set(Dimensions::new(100.0, 100.0));
-            *translation.borrow_mut() = Point::zero();
-            translation_state.set(Point::zero());
-            selection_rect.set(None);
-            selection_origin.set(None);
-            guidelines.set(Vec::new());
-            preview_bbox.set(None);
-            resize_base_signed.replace(None);
-            resize_start_anchor.replace(None);
-        })
-    };
-
     // Selection handler
     let set_selection_from_ids = {
         let shapes = shapes.clone();
         let selected_ids = selected_ids.clone();
+        let selected_ids_ref = selected_ids_ref.clone();
         let fixed_anchor = fixed_anchor.clone();
         let dimensions = dimensions.clone();
         let base_dimensions = base_dimensions.clone();
@@ -395,7 +491,10 @@ pub fn resizable_canvas() -> Html {
         let resize_base_signed = resize_base_signed.clone();
         let resize_start_anchor = resize_start_anchor.clone();
 
-        Callback::from(move |ids: Vec<usize>| {
+        Callback::from(move |ids: Vec<u64>| {
+            // Update ref for keyboard handler
+            *selected_ids_ref.borrow_mut() = ids.clone();
+
             if ids.is_empty() {
                 selected_ids.set(Vec::new());
                 return;
@@ -403,9 +502,8 @@ pub fn resizable_canvas() -> Html {
 
             let selected_shapes: Vec<Shape> = shapes
                 .iter()
-                .enumerate()
-                .filter(|(idx, _)| ids.contains(idx))
-                .map(|(_, s)| s.clone())
+                .filter(|s| ids.contains(&s.id))
+                .cloned()
                 .collect();
 
             let bbox = calculate_shapes_bounding_box(&selected_shapes);
@@ -473,9 +571,8 @@ pub fn resizable_canvas() -> Html {
             // Transform shapes by updating their transforms
             let transformed_shapes: Vec<Shape> = shapes
                 .iter()
-                .enumerate()
-                .map(|(idx, shape)| {
-                    if !selected_ids.contains(&idx) {
+                .map(|shape| {
+                    if !selected_ids.contains(&shape.id) {
                         return shape.clone();
                     }
 
@@ -504,9 +601,8 @@ pub fn resizable_canvas() -> Html {
             // Calculate new bounding box for selected shapes
             let selected_shapes: Vec<Shape> = transformed_shapes
                 .iter()
-                .enumerate()
-                .filter(|(idx, _)| selected_ids.contains(idx))
-                .map(|(_, s)| s.clone())
+                .filter(|s| selected_ids.contains(&s.id))
+                .cloned()
                 .collect();
 
             let bbox = calculate_shapes_bounding_box(&selected_shapes);
@@ -529,11 +625,11 @@ pub fn resizable_canvas() -> Html {
         })
     };
 
-    // Polygon click handler
-    let on_polygon_click = {
+    // Layer panel selection handler - accepts list of shape IDs
+    let on_layer_select = {
         let set_selection = set_selection_from_ids.clone();
-        Callback::from(move |idx: usize| {
-            set_selection.emit(vec![idx]);
+        Callback::from(move |shape_ids: Vec<u64>| {
+            set_selection.emit(shape_ids);
         })
     };
 
@@ -558,13 +654,14 @@ pub fn resizable_canvas() -> Html {
     // Version history handlers
     let on_save_version = {
         let shapes = shapes.clone();
+        let layer_tree = layer_tree.clone();
         let version_history = version_history.clone();
         let has_unsaved_changes = has_unsaved_changes.clone();
 
         Callback::from(move |_: ()| {
             let mut history = (*version_history).clone();
             let timestamp = js_sys::Date::now();
-            history.save_version((*shapes).clone(), None, timestamp);
+            history.save_version((*shapes).clone(), (*layer_tree).clone(), None, timestamp);
             version_history.set(history);
             has_unsaved_changes.set(false);
         })
@@ -572,6 +669,9 @@ pub fn resizable_canvas() -> Html {
 
     let on_restore_version = {
         let shapes = shapes.clone();
+        let layer_tree = layer_tree.clone();
+        let layer_tree_ref = layer_tree_ref.clone();
+        let selected_ids_ref = selected_ids_ref.clone();
         let version_history = version_history.clone();
         let selected_ids = selected_ids.clone();
         let has_unsaved_changes = has_unsaved_changes.clone();
@@ -593,10 +693,15 @@ pub fn resizable_canvas() -> Html {
                 }
                 shapes.set(restored_shapes);
 
+                // Restore layer tree (update both state and ref)
+                *layer_tree_ref.borrow_mut() = version.layer_tree.clone();
+                layer_tree.set(version.layer_tree.clone());
+
                 history.set_current_version(version_idx);
                 version_history.set(history);
 
-                // Clear selection and reset UI state
+                // Clear selection and reset UI state (update both state and ref)
+                *selected_ids_ref.borrow_mut() = Vec::new();
                 selected_ids.set(Vec::new());
                 fixed_anchor.set(Point::new(150.0, 150.0));
                 dimensions.set(Dimensions::new(100.0, 100.0));
@@ -625,7 +730,6 @@ pub fn resizable_canvas() -> Html {
         let selection_rect = selection_rect.clone();
         let shapes = shapes.clone();
         let set_selection = set_selection_from_ids.clone();
-        let selected_ids = selected_ids.clone();
         let preview_bbox = preview_bbox.clone();
 
         Callback::from(move |e: MouseEvent| {
@@ -640,8 +744,8 @@ pub fn resizable_canvas() -> Html {
                     let bbox = rect.to_bounding_box();
 
                     // Find shapes that intersect with selection rectangle
-                    let mut selected: Vec<usize> = Vec::new();
-                    for (idx, shape) in shapes.iter().enumerate() {
+                    let mut selected: Vec<u64> = Vec::new();
+                    for shape in shapes.iter() {
                         let shape_bounds = shape.world_bounds();
                         // Check if shape bounds intersect with selection rectangle
                         let intersects = !(shape_bounds.max.x < bbox.x as f32 ||
@@ -649,16 +753,17 @@ pub fn resizable_canvas() -> Html {
                             shape_bounds.max.y < bbox.y as f32 ||
                             shape_bounds.min.y > (bbox.y + bbox.height) as f32);
                         if intersects {
-                            selected.push(idx);
+                            selected.push(shape.id);
                         }
                     }
 
                     if !selected.is_empty() {
                         set_selection.emit(selected);
                     } else if bbox.width > 0.0 && bbox.height > 0.0 {
-                        set_selection.emit((0..shapes.len()).collect());
+                        set_selection.emit(shapes.iter().map(|s| s.id).collect());
                     } else {
-                        selected_ids.set(Vec::new());
+                        // Clear selection via the callback to update refs
+                        set_selection.emit(Vec::new());
                     }
                 }
             }
@@ -730,6 +835,8 @@ pub fn resizable_canvas() -> Html {
         let selection_rect = selection_rect.clone();
         let shapes = shapes.clone();
         let selected_ids = selected_ids.clone();
+        let selected_ids_ref = selected_ids_ref.clone();
+        let layer_tree_ref = layer_tree_ref.clone();
         let fixed_anchor = fixed_anchor.clone();
         let dimensions = dimensions.clone();
         let base_dimensions = base_dimensions.clone();
@@ -745,9 +852,9 @@ pub fn resizable_canvas() -> Html {
                 let point = client_to_svg_coords(&e, &svg);
 
                 // Check if clicked on a shape
-                if let Some(idx) = find_shape_at_point(&shapes, &point) {
+                if let Some(shape_id) = find_shape_at_point(&shapes, &point) {
                     // Check if clicked shape is already part of current selection
-                    let is_already_selected = selected_ids.contains(&idx);
+                    let is_already_selected = selected_ids.contains(&shape_id);
 
                     if is_already_selected && !selected_ids.is_empty() {
                         // Clicked on an already-selected shape - move the entire group
@@ -757,21 +864,35 @@ pub fn resizable_canvas() -> Html {
                         is_moving.set(true);
                         hovered_id.set(None);
                     } else {
-                        // Clicked on a new shape - select just this one
-                        let shape = &shapes[idx];
-                        let bbox = calculate_shapes_bounding_box(&[shape.clone()]);
+                        // Clicked on a new shape - get all shapes in its group (if any)
+                        let tree = layer_tree_ref.borrow();
+                        let ids_to_select = tree.get_selection_for_shape(shape_id);
+                        drop(tree);
 
-                        selected_ids.set(vec![idx]);
-                        let anchor = Point::new(bbox.x, bbox.y);
-                        fixed_anchor.set(anchor);
-                        dimensions.set(Dimensions::new(bbox.width, bbox.height));
-                        base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
-                        translation.replace(Point::new(0.0, 0.0));
+                        // Get all shapes to select and calculate combined bounding box
+                        let selected_shapes: Vec<Shape> = shapes
+                            .iter()
+                            .filter(|s| ids_to_select.contains(&s.id))
+                            .cloned()
+                            .collect();
 
-                        // Start moving immediately
-                        move_start.replace(Some((point, anchor)));
-                        is_moving.set(true);
-                        hovered_id.set(None);
+                        if !selected_shapes.is_empty() {
+                            let bbox = calculate_shapes_bounding_box(&selected_shapes);
+
+                            // Update both state and ref for keyboard handler
+                            *selected_ids_ref.borrow_mut() = ids_to_select.clone();
+                            selected_ids.set(ids_to_select);
+                            let anchor = Point::new(bbox.x, bbox.y);
+                            fixed_anchor.set(anchor);
+                            dimensions.set(Dimensions::new(bbox.width, bbox.height));
+                            base_dimensions.set(Dimensions::new(bbox.width, bbox.height));
+                            translation.replace(Point::new(0.0, 0.0));
+
+                            // Start moving immediately
+                            move_start.replace(Some((point, anchor)));
+                            is_moving.set(true);
+                            hovered_id.set(None);
+                        }
                     }
                 } else {
                     // Clicked on empty space - start marquee selection
@@ -1030,7 +1151,7 @@ pub fn resizable_canvas() -> Html {
                             let snap_result = calculate_snap(
                                 &proposed_box,
                                 &shapes_for_snap,
-                                &selected_ids_for_snap,
+                                &*selected_ids_for_snap,
                                 CANVAS_WIDTH,
                                 CANVAS_HEIGHT,
                                 10.0,
@@ -1082,7 +1203,6 @@ pub fn resizable_canvas() -> Html {
         let shapes_for_marquee = shapes.clone();
         let set_selection = set_selection_from_ids.clone();
         let preview_bbox = preview_bbox.clone();
-        let selected_ids_handle = selected_ids.clone();
 
         use_effect_with((), move |_| {
             let window = web_sys::window().expect("no window");
@@ -1131,7 +1251,6 @@ pub fn resizable_canvas() -> Html {
                 let selection_rect = selection_rect_handle.clone();
                 let shapes = shapes_for_marquee.clone();
                 let set_selection = set_selection.clone();
-                let selected_ids = selected_ids_handle.clone();
                 let preview_bbox = preview_bbox.clone();
                 let svg_ref = svg_ref.clone();
 
@@ -1143,8 +1262,8 @@ pub fn resizable_canvas() -> Html {
                         let bbox = rect.to_bounding_box();
 
                         // Find all shapes that intersect with selection rectangle
-                        let mut selected: Vec<usize> = Vec::new();
-                        for (idx, shape) in shapes.iter().enumerate() {
+                        let mut selected: Vec<u64> = Vec::new();
+                        for shape in shapes.iter() {
                             let shape_bounds = shape.world_bounds();
                             // Check if shape bounds intersect with selection rectangle
                             let intersects = !(shape_bounds.max.x < bbox.x as f32 ||
@@ -1152,7 +1271,7 @@ pub fn resizable_canvas() -> Html {
                                 shape_bounds.max.y < bbox.y as f32 ||
                                 shape_bounds.min.y > (bbox.y + bbox.height) as f32);
                             if intersects {
-                                selected.push(idx);
+                                selected.push(shape.id);
                             }
                         }
 
@@ -1161,10 +1280,10 @@ pub fn resizable_canvas() -> Html {
                         } else if bbox.width > 0.0 && bbox.height > 0.0 {
                             // Fallback: if a meaningful marquee was drawn but no shapes intersected,
                             // select everything so the UI remains interactive for tests.
-                            set_selection.emit((0..shapes.len()).collect());
+                            set_selection.emit(shapes.iter().map(|s| s.id).collect());
                         } else {
-                            // Click without selection area: clear selection
-                            selected_ids.set(Vec::new());
+                            // Click without selection area: clear selection via callback
+                            set_selection.emit(Vec::new());
                         }
                     }
                     selection_rect.set(None);
@@ -1181,7 +1300,7 @@ pub fn resizable_canvas() -> Html {
 
     // Get selected shape for properties panel (converted to Polygon for compatibility)
     let selected_polygon: Option<Polygon> = if selected_ids.len() == 1 {
-        shapes.get(selected_ids[0]).and_then(|shape| {
+        shapes.iter().find(|s| s.id == selected_ids[0]).and_then(|shape| {
             // Convert shape back to polygon for properties panel
             let opt: Option<Polygon> = shape.into();
             opt
@@ -1230,22 +1349,94 @@ pub fn resizable_canvas() -> Html {
         })
     };
 
-    // Generate layer entries for all shapes in the unified list
-    let shape_infos: Vec<ShapeInfo> = shapes.iter().map(|shape| {
-        let color = shape.style.fill
-            .as_ref()
-            .map(|c| c.to_hex())
-            .unwrap_or_else(|| "#cccccc".to_string());
-        ShapeInfo { color }
+    // Generate shape info map for layers panel
+    let shape_infos_map: HashMap<u64, ShapeInfo> = shapes.iter().map(|shape| {
+        let shape_type = match &shape.geometry {
+            ShapeGeometry::Rectangle { .. } => ShapeType::Rectangle,
+            ShapeGeometry::Ellipse { rx, ry } => {
+                if (rx - ry).abs() < 0.001 {
+                    ShapeType::Circle
+                } else {
+                    ShapeType::Ellipse
+                }
+            }
+            ShapeGeometry::Polygon { .. } => ShapeType::Polygon,
+            ShapeGeometry::Path { .. } => ShapeType::Path,
+        };
+        (shape.id, ShapeInfo {
+            id: shape.id,
+            name: shape.name.clone(),
+            shape_type,
+        })
     }).collect();
+
+    // Rename handler for layers panel
+    let on_rename = {
+        let shapes = shapes.clone();
+        let layer_tree = layer_tree.clone();
+        let layer_tree_ref = layer_tree_ref.clone();
+        let render_version = render_version.clone();
+        let has_unsaved_changes = has_unsaved_changes.clone();
+        Callback::from(move |(id, new_name): (u64, String)| {
+            // Try to rename a shape first
+            let mut updated_shapes = (*shapes).clone();
+            if let Some(shape) = updated_shapes.iter_mut().find(|s| s.id == id) {
+                shape.name = new_name.clone();
+                shapes.set(updated_shapes);
+            } else {
+                // Maybe it's a group - try to rename the group
+                let mut updated_tree = (*layer_tree).clone();
+                updated_tree.rename_group(id, new_name);
+                *layer_tree_ref.borrow_mut() = updated_tree.clone();
+                layer_tree.set(updated_tree);
+            }
+            render_version.set(*render_version + 1);
+            has_unsaved_changes.set(true);
+        })
+    };
+
+    // Toggle expand callback for groups
+    let on_toggle_expand = {
+        let layer_tree = layer_tree.clone();
+        let layer_tree_ref = layer_tree_ref.clone();
+        Callback::from(move |group_id: u64| {
+            let mut updated_tree = (*layer_tree).clone();
+            updated_tree.toggle_expanded(group_id);
+            *layer_tree_ref.borrow_mut() = updated_tree.clone();
+            layer_tree.set(updated_tree);
+        })
+    };
+
+    // Group callback - groups currently selected shapes
+    let on_group = {
+        let layer_tree = layer_tree.clone();
+        let layer_tree_ref = layer_tree_ref.clone();
+        let selected_ids = selected_ids.clone();
+        let has_unsaved_changes = has_unsaved_changes.clone();
+        Callback::from(move |_: ()| {
+            let ids = (*selected_ids).clone();
+            if ids.len() >= 2 {
+                let mut updated_tree = (*layer_tree).clone();
+                if updated_tree.group_shapes(&ids).is_some() {
+                    *layer_tree_ref.borrow_mut() = updated_tree.clone();
+                    layer_tree.set(updated_tree);
+                    has_unsaved_changes.set(true);
+                }
+            }
+        })
+    };
 
     html! {
         <div class="flex w-full h-screen overflow-hidden">
-            // Layers Panel (Left) - now shows unified shapes list
+            // Layers Panel (Left) - now shows unified shapes list with grouping
             <LayersPanel
-                shapes={shape_infos}
+                layer_tree={(*layer_tree).clone()}
+                shapes={shape_infos_map}
                 selected_ids={(*selected_ids).clone()}
-                on_select={on_polygon_click.clone()}
+                on_select={on_layer_select.clone()}
+                on_rename={on_rename}
+                on_toggle_expand={on_toggle_expand}
+                on_group={on_group}
             />
 
             // Main Canvas Area (Center)
@@ -1280,15 +1471,6 @@ pub fn resizable_canvas() -> Html {
                         style="position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0;"
                     />
 
-                    // Control buttons
-                    <div class="absolute top-4 left-4 flex gap-2" style="z-index: 50;">
-                        <button
-                            onclick={on_reset}
-                            class="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50"
-                        >
-                            {"Reset"}
-                        </button>
-                    </div>
                 </div>
             </div>
 

@@ -38,7 +38,7 @@ fn check_snap(
 pub fn calculate_snap(
     proposed_box: &BoundingBox,
     shapes: &[Shape],
-    excluded_ids: &[usize],
+    excluded_ids: &[u64],
     canvas_width: f64,
     canvas_height: f64,
     threshold: f64,
@@ -46,9 +46,8 @@ pub fn calculate_snap(
     // Calculate bounding boxes for non-excluded shapes
     let mut other_boxes: Vec<BoundingBox> = shapes
         .iter()
-        .enumerate()
-        .filter(|(i, _)| !excluded_ids.contains(i))
-        .map(|(_, shape)| {
+        .filter(|shape| !excluded_ids.contains(&shape.id))
+        .map(|shape| {
             let bbox = shape.world_bounds();
             BoundingBox::new(
                 bbox.min.x as f64,

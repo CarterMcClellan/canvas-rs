@@ -1,4 +1,4 @@
-use crate::scene::Shape;
+use crate::scene::{Shape, LayerTree};
 
 /// Represents a single saved version/snapshot of the canvas state
 #[derive(Clone, Debug, PartialEq)]
@@ -11,15 +11,18 @@ pub struct Version {
     pub created_at: f64,
     /// Snapshot of all shapes at this version
     pub shapes: Vec<Shape>,
+    /// Snapshot of the layer tree (grouping hierarchy)
+    pub layer_tree: LayerTree,
 }
 
 impl Version {
-    pub fn new(id: u64, label: String, created_at: f64, shapes: Vec<Shape>) -> Self {
+    pub fn new(id: u64, label: String, created_at: f64, shapes: Vec<Shape>, layer_tree: LayerTree) -> Self {
         Self {
             id,
             label,
             created_at,
             shapes,
+            layer_tree,
         }
     }
 }
@@ -51,12 +54,13 @@ impl VersionHistory {
     }
 
     /// Save current state as a new version
-    pub fn save_version(&mut self, shapes: Vec<Shape>, label: Option<String>, timestamp: f64) -> &Version {
+    pub fn save_version(&mut self, shapes: Vec<Shape>, layer_tree: LayerTree, label: Option<String>, timestamp: f64) -> &Version {
         let version = Version::new(
             self.next_id,
             label.unwrap_or_else(|| format!("Version {}", self.next_id)),
             timestamp,
             shapes,
+            layer_tree,
         );
         self.next_id += 1;
         self.versions.push(version);
@@ -111,8 +115,9 @@ mod tests {
     fn test_save_version() {
         let mut history = VersionHistory::new();
         let shapes = vec![create_test_shape()];
+        let layer_tree = LayerTree::from_shapes(&shapes.iter().map(|s| s.id).collect::<Vec<_>>());
 
-        history.save_version(shapes.clone(), None, 1000.0);
+        history.save_version(shapes.clone(), layer_tree.clone(), None, 1000.0);
 
         assert_eq!(history.len(), 1);
         assert_eq!(history.next_id, 2);
@@ -122,15 +127,17 @@ mod tests {
         assert_eq!(version.id, 1);
         assert_eq!(version.label, "Version 1");
         assert_eq!(version.shapes.len(), 1);
+        assert_eq!(version.layer_tree.nodes.len(), 1);
     }
 
     #[test]
     fn test_set_current_version() {
         let mut history = VersionHistory::new();
         let shapes = vec![create_test_shape()];
+        let layer_tree = LayerTree::from_shapes(&shapes.iter().map(|s| s.id).collect::<Vec<_>>());
 
-        history.save_version(shapes.clone(), None, 1000.0);
-        history.save_version(shapes.clone(), None, 2000.0);
+        history.save_version(shapes.clone(), layer_tree.clone(), None, 1000.0);
+        history.save_version(shapes.clone(), layer_tree.clone(), None, 2000.0);
 
         assert_eq!(history.current_version_idx, Some(1));
 
