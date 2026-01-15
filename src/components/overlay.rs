@@ -9,9 +9,9 @@ pub struct OverlayProps {
     #[prop_or_default]
     pub selection_bbox: Option<BBox>,
 
-    /// Selected shape indices (for test data attribute)
+    /// Selected shape IDs (for test data attribute)
     #[prop_or_default]
-    pub selected_ids: Vec<usize>,
+    pub selected_ids: Vec<u64>,
 
     /// Flip state for X axis (for test data attribute)
     #[prop_or(false)]

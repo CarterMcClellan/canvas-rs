@@ -31,9 +31,9 @@ pub struct GpuCanvasProps {
     #[prop_or_default]
     pub selection_bbox: Option<BBox>,
 
-    /// Selected shape indices
+    /// Selected shape IDs
     #[prop_or_default]
-    pub selected_ids: Vec<usize>,
+    pub selected_ids: Vec<u64>,
 
     /// Flip state for X axis
     #[prop_or(false)]

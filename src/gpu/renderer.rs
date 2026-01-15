@@ -56,7 +56,7 @@ impl Renderer {
 
         // Create surface from canvas
         let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.into()))
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .map_err(|e| format!("Failed to create surface: {e}"))?;
 
         // Request adapter

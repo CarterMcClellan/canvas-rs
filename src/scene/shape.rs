@@ -5,8 +5,40 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Global shape ID counter
 static NEXT_SHAPE_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Counters for auto-generating shape names by type
+static NEXT_POLYGON_NUM: AtomicU64 = AtomicU64::new(1);
+static NEXT_RECTANGLE_NUM: AtomicU64 = AtomicU64::new(1);
+static NEXT_ELLIPSE_NUM: AtomicU64 = AtomicU64::new(1);
+static NEXT_PATH_NUM: AtomicU64 = AtomicU64::new(1);
+
 fn generate_shape_id() -> u64 {
     NEXT_SHAPE_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Generate a default name based on geometry type
+fn generate_shape_name(geometry: &ShapeGeometry) -> String {
+    match geometry {
+        ShapeGeometry::Polygon { .. } => {
+            let num = NEXT_POLYGON_NUM.fetch_add(1, Ordering::Relaxed);
+            format!("Polygon {}", num)
+        }
+        ShapeGeometry::Rectangle { .. } => {
+            let num = NEXT_RECTANGLE_NUM.fetch_add(1, Ordering::Relaxed);
+            format!("Rectangle {}", num)
+        }
+        ShapeGeometry::Ellipse { rx, ry } if (rx - ry).abs() < 0.001 => {
+            let num = NEXT_ELLIPSE_NUM.fetch_add(1, Ordering::Relaxed);
+            format!("Circle {}", num)
+        }
+        ShapeGeometry::Ellipse { .. } => {
+            let num = NEXT_ELLIPSE_NUM.fetch_add(1, Ordering::Relaxed);
+            format!("Ellipse {}", num)
+        }
+        ShapeGeometry::Path { .. } => {
+            let num = NEXT_PATH_NUM.fetch_add(1, Ordering::Relaxed);
+            format!("Path {}", num)
+        }
+    }
 }
 
 /// Path command for arbitrary vector paths
@@ -171,6 +203,9 @@ pub struct Shape {
     /// Unique identifier
     pub id: u64,
 
+    /// User-editable name for display in layers panel
+    pub name: String,
+
     /// The geometry of this shape
     pub geometry: ShapeGeometry,
 
@@ -185,10 +220,12 @@ pub struct Shape {
 }
 
 impl Shape {
-    /// Create a new shape with auto-generated ID
+    /// Create a new shape with auto-generated ID and name
     pub fn new(geometry: ShapeGeometry, style: ShapeStyle) -> Self {
+        let name = generate_shape_name(&geometry);
         Self {
             id: generate_shape_id(),
+            name,
             geometry,
             transform: Transform2D::identity(),
             style,
@@ -196,15 +233,23 @@ impl Shape {
         }
     }
 
-    /// Create a new shape with a specific ID
+    /// Create a new shape with a specific ID (name is auto-generated)
     pub fn with_id(id: u64, geometry: ShapeGeometry, style: ShapeStyle) -> Self {
+        let name = generate_shape_name(&geometry);
         Self {
             id,
+            name,
             geometry,
             transform: Transform2D::identity(),
             style,
             dirty: true,
         }
+    }
+
+    /// Set a custom name
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
     }
 
     /// Set the transform
