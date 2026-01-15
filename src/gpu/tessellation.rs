@@ -8,6 +8,10 @@ use lyon::tessellation::{
 };
 use std::collections::HashMap;
 
+/// Tessellation tolerance in pixels - lower values produce smoother curves
+/// Default is 0.25, we use 0.1 for higher quality rendering
+const TESSELLATION_TOLERANCE: f32 = 0.1;
+
 /// Convert an SVG elliptical arc to cubic bezier curves
 /// Based on the SVG arc implementation algorithm
 fn arc_to_beziers(
@@ -346,7 +350,7 @@ impl Tessellator {
 
         let result = self.fill_tessellator.tessellate_path(
             &path,
-            &FillOptions::default(),
+            &FillOptions::tolerance(TESSELLATION_TOLERANCE),
             &mut BuffersBuilder::new(&mut buffers, |vertex: FillVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -392,7 +396,7 @@ impl Tessellator {
 
         let result = self.stroke_tessellator.tessellate_path(
             &path,
-            &StrokeOptions::default().with_line_width(width),
+            &StrokeOptions::tolerance(TESSELLATION_TOLERANCE).with_line_width(width),
             &mut BuffersBuilder::new(&mut buffers, |vertex: StrokeVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -488,7 +492,7 @@ impl Tessellator {
 
         let result = self.fill_tessellator.tessellate_path(
             &path,
-            &FillOptions::default(),
+            &FillOptions::tolerance(TESSELLATION_TOLERANCE),
             &mut BuffersBuilder::new(&mut buffers, |vertex: FillVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -570,7 +574,7 @@ impl Tessellator {
 
         let result = self.stroke_tessellator.tessellate_path(
             &path,
-            &StrokeOptions::default().with_line_width(stroke_width),
+            &StrokeOptions::tolerance(TESSELLATION_TOLERANCE).with_line_width(stroke_width),
             &mut BuffersBuilder::new(&mut buffers, |vertex: StrokeVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -655,7 +659,7 @@ impl Tessellator {
 
         let result = self.fill_tessellator.tessellate_path(
             &path,
-            &FillOptions::default(),
+            &FillOptions::tolerance(TESSELLATION_TOLERANCE),
             &mut BuffersBuilder::new(&mut buffers, |vertex: FillVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -734,7 +738,7 @@ impl Tessellator {
 
         let result = self.stroke_tessellator.tessellate_path(
             &path,
-            &StrokeOptions::default().with_line_width(width),
+            &StrokeOptions::tolerance(TESSELLATION_TOLERANCE).with_line_width(width),
             &mut BuffersBuilder::new(&mut buffers, |vertex: StrokeVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -849,7 +853,7 @@ impl Tessellator {
 
         let result = self.fill_tessellator.tessellate_path(
             &path,
-            &FillOptions::default(),
+            &FillOptions::tolerance(TESSELLATION_TOLERANCE),
             &mut BuffersBuilder::new(&mut buffers, |vertex: FillVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,
@@ -965,7 +969,7 @@ impl Tessellator {
 
         let result = self.stroke_tessellator.tessellate_path(
             &path,
-            &StrokeOptions::default().with_line_width(width),
+            &StrokeOptions::tolerance(TESSELLATION_TOLERANCE).with_line_width(width),
             &mut BuffersBuilder::new(&mut buffers, |vertex: StrokeVertex| Vertex {
                 position: [vertex.position().x, vertex.position().y],
                 color: color_arr,

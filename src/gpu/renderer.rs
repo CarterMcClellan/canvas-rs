@@ -25,6 +25,9 @@ fn multiply_mat4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     result
 }
 
+/// MSAA sample count for anti-aliasing (1 = disabled, 4 = recommended)
+const MSAA_SAMPLES: u32 = 4;
+
 /// GPU renderer using wgpu
 /// Handles WebGL/WebGPU initialization and shape rendering
 pub struct Renderer {
@@ -37,6 +40,8 @@ pub struct Renderer {
     index_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+    msaa_texture: wgpu::Texture,
+    msaa_view: wgpu::TextureView,
     width: u32,
     height: u32,
 }
@@ -117,6 +122,10 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
+        // Create MSAA texture for anti-aliased rendering
+        let (msaa_texture, msaa_view) =
+            Self::create_msaa_texture(&device, width, height, surface_format);
+
         // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shape Shader"),
@@ -192,7 +201,7 @@ impl Renderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -225,9 +234,36 @@ impl Renderer {
             index_buffer,
             uniform_buffer,
             uniform_bind_group,
+            msaa_texture,
+            msaa_view,
             width,
             height,
         })
+    }
+
+    /// Create MSAA texture for anti-aliased rendering
+    fn create_msaa_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("MSAA Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: MSAA_SAMPLES,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
     }
 
     /// Resize the renderer when canvas size changes
@@ -238,6 +274,12 @@ impl Renderer {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+
+            // Recreate MSAA texture at new size
+            let (msaa_texture, msaa_view) =
+                Self::create_msaa_texture(&self.device, width, height, self.config.format);
+            self.msaa_texture = msaa_texture;
+            self.msaa_view = msaa_view;
 
             // Update uniforms with new projection
             let uniforms = Uniforms::orthographic(width as f32, height as f32);
@@ -289,13 +331,13 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
-        // Begin render pass
+        // Begin render pass - render to MSAA texture, resolve to swapchain
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Shape Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: &self.msaa_view,
+                    resolve_target: Some(&view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: clear_color[0] as f64,
@@ -303,7 +345,7 @@ impl Renderer {
                             b: clear_color[2] as f64,
                             a: clear_color[3] as f64,
                         }),
-                        store: wgpu::StoreOp::Store,
+                        store: wgpu::StoreOp::Discard, // MSAA samples discarded after resolve
                     },
                 })],
                 depth_stencil_attachment: None,
@@ -361,7 +403,24 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // First pass: clear the screen
+        // Collect renderable shapes
+        let renderable_shapes: Vec<_> = shapes
+            .iter()
+            .filter_map(|shape| {
+                let mesh = shape_meshes.get(&shape.id)?;
+                if mesh.is_empty()
+                    || mesh.vertices.len() > MAX_VERTICES
+                    || mesh.indices.len() > MAX_INDICES
+                {
+                    return None;
+                }
+                Some((shape, mesh))
+            })
+            .collect();
+
+        let total_shapes = renderable_shapes.len();
+
+        // First pass: clear the MSAA texture
         {
             let mut encoder = self
                 .device
@@ -373,8 +432,12 @@ impl Renderer {
                 let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Clear Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
+                        view: &self.msaa_view,
+                        resolve_target: if total_shapes == 0 {
+                            Some(&view) // Resolve immediately if no shapes
+                        } else {
+                            None
+                        },
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
                                 r: clear_color[0] as f64,
@@ -394,21 +457,10 @@ impl Renderer {
             self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Render each shape with its own transform
+        // Render each shape with its own transform to MSAA texture
         // Each shape needs its own submit because uniform buffers are shared
-        for shape in shapes {
-            let mesh = match shape_meshes.get(&shape.id) {
-                Some(m) => m,
-                None => continue, // Skip shapes without meshes
-            };
-
-            if mesh.is_empty() {
-                continue;
-            }
-
-            if mesh.vertices.len() > MAX_VERTICES || mesh.indices.len() > MAX_INDICES {
-                continue; // Skip shapes that are too large
-            }
+        for (i, (shape, mesh)) in renderable_shapes.iter().enumerate() {
+            let is_last = i == total_shapes - 1;
 
             // Get transform - compose override with shape's base transform if available
             // The shape's base transform positions the shape in world space
@@ -442,11 +494,15 @@ impl Renderer {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Shape Render Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
+                        view: &self.msaa_view,
+                        resolve_target: if is_last { Some(&view) } else { None },
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load, // Don't clear, preserve previous draws
-                            store: wgpu::StoreOp::Store,
+                            store: if is_last {
+                                wgpu::StoreOp::Discard // MSAA samples discarded after resolve
+                            } else {
+                                wgpu::StoreOp::Store
+                            },
                         },
                     })],
                     depth_stencil_attachment: None,

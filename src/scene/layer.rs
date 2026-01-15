@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Global group ID counter
-static NEXT_GROUP_ID: AtomicU64 = AtomicU64::new(1);
+/// Global group ID counter - starts at high offset to avoid collision with shape IDs
+static NEXT_GROUP_ID: AtomicU64 = AtomicU64::new(1_000_000_000);
 
 fn generate_group_id() -> u64 {
     NEXT_GROUP_ID.fetch_add(1, Ordering::Relaxed)
@@ -42,7 +42,7 @@ impl LayerNode {
             id: generate_group_id(),
             name,
             children: Vec::new(),
-            expanded: true,
+            expanded: false,
         }
     }
 
@@ -196,7 +196,7 @@ impl LayerTree {
             id: generate_group_id(),
             name: generate_group_name(),
             children: nodes_to_group,
-            expanded: true,
+            expanded: false,
         };
         let group_id = group.id();
 
